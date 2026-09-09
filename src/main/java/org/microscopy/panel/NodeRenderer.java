@@ -23,6 +23,7 @@ public final class NodeRenderer {
   private final SourceProvider sources;
   private final ScientificImageRenderer images = new ScientificImageRenderer();
   private final TextRenderer text = new TextRenderer();
+  private final java.util.Set<String> overflowed = new java.util.LinkedHashSet<String>();
   private final LinkedHashMap<String, BufferedImage> cache =
       new LinkedHashMap<String, BufferedImage>(16, 0.75f, true) {
         protected boolean removeEldestEntry(Map.Entry<String, BufferedImage> eldest) {
@@ -33,6 +34,9 @@ public final class NodeRenderer {
   public NodeRenderer(SourceProvider sources) { this.sources = sources; }
 
   public void clearCache() { cache.clear(); }
+
+  /** Text nodes whose content did not fit, gathered during the last paint. */
+  public java.util.Set<String> overflowedNodes() { return overflowed; }
 
   /**
    * @param originPxX pixel coordinate of the surface's left edge within the page
@@ -181,6 +185,9 @@ public final class NodeRenderer {
       // already placed every line where it belongs.
       if (shapes == null || shapes.isEmpty())
         local.translate(0, Math.max(0, (boxHeight - flowed.usedHeight) / 2.0));
+      // Overflow is only knowable once the text is measured, so the renderer collects it and the
+      // window reports it; the default policy is to say so rather than to silently reflow.
+      if (flowed.overflowed) overflowed.add(node.id);
       text.draw(local, flowed);
     } finally {
       local.dispose();

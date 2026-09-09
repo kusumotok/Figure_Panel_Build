@@ -30,6 +30,9 @@ public class PosterCanvas extends JPanel {
     void documentChanged();
 
     void contextMenu(String nodeId, int x, int y);
+
+    /** Reported after a repaint; text overflow is only knowable once the text is measured. */
+    void overflowChanged(java.util.Set<String> nodeIds);
   }
 
   /** A grid line between two tracks of one container. */
@@ -63,6 +66,7 @@ public class PosterCanvas extends JPanel {
   private Point pressPoint, panPoint;
   private int dropRow = -1, dropColumn = -1;
   private boolean dragging;
+  private java.util.Set<String> overflowed = new java.util.LinkedHashSet<String>();
 
   public PosterCanvas(SourceProvider sources, Listener listener) {
     this.sources = sources;
@@ -373,7 +377,16 @@ public class PosterCanvas extends JPanel {
   private BufferedImage renderPage() {
     RenderTarget target = new RenderTarget(dpi(), RenderTarget.Background.WHITE);
     try {
-      return new DocumentRasterizer(sources).rasterizeWhole(document, page, layout, target);
+      DocumentRasterizer rasterizer = new DocumentRasterizer(sources);
+      BufferedImage image = rasterizer.rasterizeWhole(document, page, layout, target);
+      final java.util.Set<String> now = rasterizer.overflowedNodes();
+      if (!now.equals(overflowed)) {
+        overflowed = now;
+        SwingUtilities.invokeLater(new Runnable() {
+          public void run() { listener.overflowChanged(now); }
+        });
+      }
+      return image;
     } catch (Exception ex) {
       BufferedImage error = new BufferedImage(
           Math.max(1, Units.mmToPx(layout.pageBox().width, dpi())),

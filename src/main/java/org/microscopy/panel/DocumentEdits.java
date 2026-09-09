@@ -194,4 +194,38 @@ public final class DocumentEdits {
         && column >= node.placement.column
         && column < node.placement.column + node.placement.columnSpan;
   }
+
+  /**
+   * Extends a text node's flow area into the neighbouring cell, creating the region on the first
+   * call. Growing one cell at a time avoids needing a multiple selection, and each step is
+   * visible on the canvas straight away.
+   */
+  public static void extendTextArea(Page page, String nodeId, boolean horizontally) {
+    Node node = require(page, nodeId);
+    if (node.content.kind != Content.Kind.TEXT)
+      throw new IllegalArgumentException("Only a text node has a text area.");
+    Node parent = page.rootNode.parentOf(nodeId);
+    if (parent == null) throw new IllegalArgumentException("The page root has no cells to use.");
+    TextContent text = node.content.text;
+    if (text.flowRegion == null || text.flowRegion.cells.isEmpty()) {
+      text.flowRegion = new FlowRegion();
+      text.flowRegion.cells.add(
+          new FlowRegion.Cell(node.placement.row, node.placement.column));
+    }
+    FlowRegion.Cell last = text.flowRegion.cells.get(text.flowRegion.cells.size() - 1);
+    FlowRegion.Cell next = new FlowRegion.Cell(last.row + (horizontally ? 0 : 1),
+        last.column + (horizontally ? 1 : 0));
+    for (FlowRegion.Cell cell : text.flowRegion.cells)
+      if (cell.same(next))
+        throw new IllegalArgumentException("That cell is already part of the text area.");
+    text.flowRegion.cells.add(next);
+  }
+
+  /** Puts a text node back in its own cell. */
+  public static void resetTextArea(Page page, String nodeId) {
+    Node node = require(page, nodeId);
+    if (node.content.kind != Content.Kind.TEXT)
+      throw new IllegalArgumentException("Only a text node has a text area.");
+    node.content.text.flowRegion = null;
+  }
 }

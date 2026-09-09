@@ -22,8 +22,12 @@ public final class DocumentRasterizer {
   }
 
   private final SourceProvider sources;
+  private java.util.Set<String> overflowed = new java.util.LinkedHashSet<String>();
 
   public DocumentRasterizer(SourceProvider sources) { this.sources = sources; }
+
+  /** Text nodes that did not fit during the last rasterisation. */
+  public java.util.Set<String> overflowedNodes() { return overflowed; }
 
   public int[] sizePx(LayoutResult layout, RenderTarget target) {
     RectMm page = layout.pageBox();
@@ -53,6 +57,7 @@ public final class DocumentRasterizer {
       }
       sink.band(band, top);
     }
+    overflowed = renderer.overflowedNodes();
   }
 
   /** Convenience for previews and tests, where the page is small enough to hold at once. */

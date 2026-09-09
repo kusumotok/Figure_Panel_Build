@@ -39,6 +39,7 @@ public class PosterFrame extends JFrame {
   private final JPanel contrastDock = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.CENTER, 0, 4));
   private org.microscopy.figure.ContrastPanel contrast;
   private String contrastNodeId;
+  private java.util.Set<String> overflowing = new java.util.LinkedHashSet<String>();
 
   public PosterFrame() {
     super("Poster / Layout");
@@ -51,6 +52,8 @@ public class PosterFrame extends JFrame {
       public void documentChanged() { attempt(() -> relayout(true)); }
 
       public void contextMenu(String nodeId, int x, int y) { showMenu(nodeId, x, y); }
+
+      public void overflowChanged(java.util.Set<String> nodeIds) { reportOverflow(nodeIds); }
     });
     inspector = new Inspector(new Inspector.Listener() {
       public void documentChanged() { relayout(true); }
@@ -542,6 +545,15 @@ public class PosterFrame extends JFrame {
         container,
         () -> DocumentEdits.convertToStack(page(), nodeId,
             node.layout.mode != LayoutSpec.Mode.STACK));
+    if (node.content.kind == Content.Kind.TEXT) {
+      menu.addSeparator();
+      item(menu, "Extend the text area to the right", !isRoot,
+          () -> DocumentEdits.extendTextArea(page(), nodeId, true));
+      item(menu, "Extend the text area downwards", !isRoot,
+          () -> DocumentEdits.extendTextArea(page(), nodeId, false));
+      item(menu, "Back to a single cell", node.content.text.flowRegion != null,
+          () -> DocumentEdits.resetTextArea(page(), nodeId));
+    }
     menu.addSeparator();
     item(menu, "Bring forward", !isRoot, () -> DocumentEdits.bringForward(page(), nodeId));
     item(menu, "Send backward", !isRoot, () -> DocumentEdits.sendBackward(page(), nodeId));
@@ -574,4 +586,24 @@ public class PosterFrame extends JFrame {
     relayout(true);
     status.setText("Removed the panel. The source images are untouched.");
   }
+
+  /**
+   * Text overflow is reported, not fixed. Shrinking type on the author's behalf would undo the
+   * sizes they set, so the status bar names the offenders and the overflow policy is theirs.
+   */
+  private void reportOverflow(java.util.Set<String> nodeIds) {
+    overflowing = nodeIds;
+    if (nodeIds.isEmpty()) return;
+    StringBuilder names = new StringBuilder();
+    for (String id : nodeIds) {
+      Node node = document == null ? null : page().rootNode.find(id);
+      if (node == null) continue;
+      if (names.length() > 0) names.append(", ");
+      names.append(node.name.isEmpty() ? id : node.name);
+    }
+    status.setText(nodeIds.size() + " text block(s) do not fit: " + names
+        + ". Enlarge the area, extend it into another cell, or change the overflow setting.");
+  }
+
+  public java.util.Set<String> overflowingNodes() { return overflowing; }
 }

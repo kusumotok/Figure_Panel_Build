@@ -136,4 +136,41 @@ class DocumentEditsTest {
     assertTrue(assertThrows(IllegalArgumentException.class,
         () -> DocumentEdits.remove(page(), root.id)).getMessage().contains("cannot be removed"));
   }
+
+  @Test
+  void extendingATextAreaBuildsARegionOneCellAtATime() {
+    twoPanels();
+    DocumentEdits.extendTextArea(page(), first.id, true);
+    document.validate();
+    FlowRegion region = first.content.text.flowRegion;
+    assertEquals(2, region.cells.size());
+    assertEquals(0, region.cells.get(0).column, "the node's own cell comes first");
+    assertEquals(1, region.cells.get(1).column);
+
+    DocumentEdits.extendTextArea(page(), first.id, false);
+    document.validate();
+    assertEquals(3, region.cells.size());
+    assertEquals(1, region.cells.get(2).row, "then down from the last cell");
+
+    // Growing onto a cell the area already holds is refused rather than duplicated.
+    FlowRegion doubled = new FlowRegion();
+    doubled.cells.add(new FlowRegion.Cell(1, 0));
+    doubled.cells.add(new FlowRegion.Cell(0, 0));
+    first.content.text.flowRegion = doubled;
+    assertTrue(assertThrows(IllegalArgumentException.class,
+        () -> DocumentEdits.extendTextArea(page(), first.id, false))
+        .getMessage().contains("already part"));
+    DocumentEdits.resetTextArea(page(), first.id);
+    assertEquals(null, first.content.text.flowRegion);
+  }
+
+  @Test
+  void onlyTextHasATextArea() {
+    twoPanels();
+    Node shape = Node.leaf("Shape", Content.of(new ShapeContent()));
+    root.add(shape, 0, 1);
+    assertTrue(assertThrows(IllegalArgumentException.class,
+        () -> DocumentEdits.extendTextArea(page(), shape.id, true))
+        .getMessage().contains("Only a text node"));
+  }
 }
