@@ -1,0 +1,29 @@
+# Text is stored with LF in the repository and checked out however the platform wants.
+* text=auto
+
+*.java text diff=java
+*.md text
+*.xml text
+*.json text
+*.ps1 text eol=crlf
+*.gitattributes text
+*.gitignore text
+
+# Binary: never normalise, never try to diff or merge.
+*.jar binary
+*.zip binary
+*.pptx binary
+*.potx binary
+*.docx binary
+*.xlsx binary
+*.pdf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.tif binary
+*.tiff binary
+*.lif binary
+*.nd2 binary
+*.czi binary
