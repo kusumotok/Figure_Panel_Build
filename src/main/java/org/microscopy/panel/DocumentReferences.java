@@ -13,9 +13,36 @@ final class DocumentReferences {
   DocumentReferences(Document document) { this.document = document; }
 
   void validate() {
+    composites();
     for (Page page : document.pages) {
       if (!pageIds.add(page.id)) throw new IllegalArgumentException("Duplicate page id: " + page.id);
       walk(page.rootNode, "Page '" + page.name + "'");
+    }
+  }
+
+  /**
+   * A composite may only bind plain sources, one level deep, and every part has to agree on the
+   * pixel grid; otherwise the channels could not be drawn over each other.
+   */
+  private void composites() {
+    for (Asset asset : document.assets.values()) {
+      if (!asset.composite()) continue;
+      for (Asset.Part part : asset.parts) {
+        Asset source = document.assets.get(part.assetId);
+        if (source == null)
+          throw new IllegalArgumentException(
+              "Composite " + asset.id + " references a missing source: " + part.assetId);
+        if (source.composite())
+          throw new IllegalArgumentException("Composite " + asset.id + " references another"
+              + " composite; composites stay one level deep so the channel order is unambiguous.");
+        if (part.channel > source.sizeC)
+          throw new IllegalArgumentException("Composite " + asset.id + " asks for channel "
+              + part.channel + " of a source that has " + source.sizeC + ".");
+        if (source.sizeX != asset.sizeX || source.sizeY != asset.sizeY)
+          throw new IllegalArgumentException("Composite " + asset.id + " combines sources of"
+              + " different sizes (" + asset.sizeX + "x" + asset.sizeY + " and "
+              + source.sizeX + "x" + source.sizeY + "); they cannot be overlaid.");
+      }
     }
   }
 
