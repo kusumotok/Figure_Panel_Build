@@ -7,3 +7,16 @@ dist/*
 !dist/figure_panel_builder_testset.zip
 引継ぎ資料/codex/
 docs/handoff/codex/
+
+# Real microscopy sources are never committed: they are large and often unpublished.
+# The synthetic Image A/B/C.tif in test-data stay tracked because the README links them.
+*.lif
+*.nd2
+*.oib
+*.oif
+*.oir
+*.czi
+*.lsm
+*.ome.tif
+*.ome.tiff
+private-data/
