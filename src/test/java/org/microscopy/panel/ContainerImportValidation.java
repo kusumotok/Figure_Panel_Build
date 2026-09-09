@@ -34,17 +34,16 @@ public final class ContainerImportValidation {
       System.out.println("  " + series + String.format(" %.4f %s/px", series.pixelWidth, series.unit));
 
     int skipped = plan.skipNamesContaining("x");
-    plan.channelsPerImage = 3;
+    plan.channelsPerImage = 2;
     System.out.println("skipped by name: " + skipped + ", kept: " + plan.kept().size()
-        + ", groups of 3: " + plan.imageCount() + ", left over: " + plan.remainder());
+        + ", images: " + plan.imageCount() + ", left over: " + plan.remainder());
 
-    // Build one composite out of the first three kept series and draw it.
+    // Build one composite out of the first kept pair and draw it.
     Document document = Document.empty();
-    ContainerImport.Plan single = new ContainerImport.Plan(file, plan.series.subList(0, 3));
-    single.channelsPerImage = 3;
+    ContainerImport.Plan single = new ContainerImport.Plan(file, plan.series.subList(0, 2));
+    single.channelsPerImage = 2;
     single.channelLabels.add("Green");
     single.channelLabels.add("Red");
-    single.channelLabels.add("Blue");
     List<Asset> placeable = importer.apply(document, single);
     Asset composite = placeable.get(0);
     System.out.println("composite: " + composite.seriesName + " C=" + composite.sizeC
@@ -103,22 +102,32 @@ public final class ContainerImportValidation {
     ContainerImport importer = new ContainerImport();
     ContainerImport.Plan plan = importer.plan(file);
     plan.skipNamesContaining("x");
-    plan.channelsPerImage = 3;
+    plan.channelsPerImage = 2;
     plan.channelLabels.add("Green");
     plan.channelLabels.add("Red");
-    plan.channelLabels.add("Blue");
     // Drop whatever does not complete a group, which is what the dialog asks the user to resolve.
     while (plan.remainder() != 0) {
       List<BioFormatsReader.Series> kept = plan.kept();
       plan.skipped.add(Integer.valueOf(kept.get(kept.size() - 1).index));
     }
-    System.out.println("placing " + plan.imageCount() + " images of 3 channels");
+    System.out.println("placing " + plan.imageCount() + " images of " + plan.channelsPerImage + " channels");
 
     final PosterFrame[] frame = new PosterFrame[1];
     javax.swing.SwingUtilities.invokeAndWait(() -> frame[0] = new PosterFrame());
     long started = System.nanoTime();
     javax.swing.SwingUtilities.invokeAndWait(() -> frame[0].addImages(file, plan));
     System.out.printf("imported and laid out in %.1f s%n", (System.nanoTime() - started) / 1e9);
+    // Test-only: make the two channels legible in the preview. The product keeps the
+    // positional default and leaves colour choice to the channel settings.
+    for (Node node : frame[0].document().page(0).rootNode.children) {
+      if (node.content.kind != Content.Kind.SCIENTIFIC_IMAGE) continue;
+      java.util.List<org.microscopy.figure.ChannelConfig> channels =
+          node.content.scientificImage.figureConfig.channels;
+      for (int i = 0; i < channels.size(); i++)
+        channels.get(i).lut = i == 0
+            ? org.microscopy.figure.ChannelConfig.Lut.Green
+            : org.microscopy.figure.ChannelConfig.Lut.Red;
+    }
     Document document = frame[0].document();
     System.out.println("assets: " + document.assets.size() + ", status: " + frame[0].statusText());
 

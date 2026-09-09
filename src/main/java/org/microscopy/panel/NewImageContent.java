@@ -53,4 +53,5 @@ public final class NewImageContent {
     if (!Double.isFinite(min)) return new double[] {0, 1};
     return new double[] {min, max > min ? max : min + 1};
   }
+
 }
