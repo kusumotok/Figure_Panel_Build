@@ -47,6 +47,10 @@ public class PosterFrame extends JFrame {
       public void selected(String nodeId) { select(nodeId); }
 
       public void enterChild(String nodeId) { select(nodeId); }
+
+      public void documentChanged() { attempt(() -> relayout(true)); }
+
+      public void contextMenu(String nodeId, int x, int y) { showMenu(nodeId, x, y); }
     });
     inspector = new Inspector(new Inspector.Listener() {
       public void documentChanged() { relayout(true); }
@@ -124,6 +128,13 @@ public class PosterFrame extends JFrame {
         .put(KeyStroke.getKeyStroke("TAB"), "selectSibling");
     root.getActionMap().put("selectSibling", new javax.swing.AbstractAction() {
       public void actionPerformed(java.awt.event.ActionEvent event) { selectNextSibling(); }
+    });
+    root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
+        .put(KeyStroke.getKeyStroke("DELETE"), "deleteNode");
+    root.getActionMap().put("deleteNode", new javax.swing.AbstractAction() {
+      public void actionPerformed(java.awt.event.ActionEvent event) {
+        attempt(() -> deleteSelected());
+      }
     });
   }
 
@@ -501,4 +512,66 @@ public class PosterFrame extends JFrame {
 
   /** True when the B and C dock is showing controls for the selection. */
   public boolean contrastShown() { return contrast != null && contrastDock.isVisible(); }
+
+  // ------------------------------------------------------------- direct edits
+
+  /**
+   * Right-click actions. Everything here is a structural edit, so it goes through DocumentEdits
+   * and then a full re-layout rather than nudging the rendered picture.
+   */
+  private void showMenu(String nodeId, int x, int y) {
+    if (document == null || nodeId == null) return;
+    select(nodeId);
+    final Node node = document.page(0).rootNode.find(nodeId);
+    if (node == null) return;
+    boolean isRoot = document.page(0).rootNode.parentOf(nodeId) == null;
+    boolean container = !node.children.isEmpty();
+    javax.swing.JPopupMenu menu = new javax.swing.JPopupMenu();
+    item(menu, "Split into a row", true, () -> DocumentEdits.split(page(), nodeId, true));
+    item(menu, "Split into a column", true, () -> DocumentEdits.split(page(), nodeId, false));
+    menu.addSeparator();
+    item(menu, "Merge with the cell on the right", !isRoot,
+        () -> DocumentEdits.expandSpan(page(), nodeId, true));
+    item(menu, "Merge with the cell below", !isRoot,
+        () -> DocumentEdits.expandSpan(page(), nodeId, false));
+    menu.addSeparator();
+    item(menu, "Wrap in a container", true, () -> DocumentEdits.wrapInContainer(page(), nodeId));
+    item(menu, "Dissolve this container", container,
+        () -> DocumentEdits.unwrap(page(), nodeId));
+    item(menu, node.layout.mode == LayoutSpec.Mode.STACK ? "Back to a grid" : "Convert to overlay",
+        container,
+        () -> DocumentEdits.convertToStack(page(), nodeId,
+            node.layout.mode != LayoutSpec.Mode.STACK));
+    menu.addSeparator();
+    item(menu, "Bring forward", !isRoot, () -> DocumentEdits.bringForward(page(), nodeId));
+    item(menu, "Send backward", !isRoot, () -> DocumentEdits.sendBackward(page(), nodeId));
+    menu.addSeparator();
+    item(menu, "Delete", !isRoot, () -> deleteSelected());
+    menu.show(canvas, x, y);
+  }
+
+  private void item(javax.swing.JPopupMenu menu, String title, boolean enabled,
+      final Runnable action) {
+    javax.swing.JMenuItem entry = new javax.swing.JMenuItem(title);
+    entry.setEnabled(enabled);
+    entry.addActionListener(event -> attempt(() -> {
+      action.run();
+      document.validate();
+      relayout(true);
+    }));
+    menu.add(entry);
+  }
+
+  private Page page() { return document.page(0); }
+
+  /** Removing a node never touches the source images, only the figure. */
+  public void deleteSelected() {
+    if (document == null || selectedId == null) return;
+    Node parent = page().rootNode.parentOf(selectedId);
+    if (parent == null) throw new IllegalArgumentException("The page root cannot be removed.");
+    DocumentEdits.remove(page(), selectedId);
+    selectedId = parent.id;
+    relayout(true);
+    status.setText("Removed the panel. The source images are untouched.");
+  }
 }

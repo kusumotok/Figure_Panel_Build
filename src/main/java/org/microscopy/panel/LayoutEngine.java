@@ -28,6 +28,7 @@ public final class LayoutEngine {
   public LayoutResult layout(Document document, Page page) {
     page.validate("Page '" + page.name + "'");
     Map<String, RectMm> rectangles = new LinkedHashMap<String, RectMm>();
+    Map<String, LayoutResult.Tracks> tracks = new LinkedHashMap<String, LayoutResult.Tracks>();
     List<String> order = new ArrayList<String>();
     List<String> warnings = new ArrayList<String>();
 
@@ -44,14 +45,14 @@ public final class LayoutEngine {
     double contentWidth = availableWidth > 0 ? availableWidth : measured.width;
     double contentHeight = availableHeight > 0 ? availableHeight : measured.height;
     RectMm content = new RectMm(page.margins.leftMm, page.margins.topMm, contentWidth, contentHeight);
-    arrange(document, page.rootNode, content, rectangles, order, warnings);
+    arrange(document, page.rootNode, content, rectangles, tracks, order, warnings);
 
     RectMm pageBox = new RectMm(0, 0,
         contentWidth + page.margins.leftMm + page.margins.rightMm,
         contentHeight + page.margins.topMm + page.margins.bottomMm);
     String warning = page.size.slideSizeWarning();
     if (!warning.isEmpty()) warnings.add(warning);
-    return new LayoutResult(rectangles, order, warnings, pageBox);
+    return new LayoutResult(rectangles, tracks, order, warnings, pageBox);
   }
 
   /** Convenience for the common single page document. */
@@ -265,7 +266,7 @@ public final class LayoutEngine {
   // ---------------------------------------------------------------- arrange
 
   private void arrange(Document document, Node node, RectMm rect, Map<String, RectMm> out,
-      List<String> order, List<String> warnings) {
+      Map<String, LayoutResult.Tracks> tracks, List<String> order, List<String> warnings) {
     out.put(node.id, rect);
     order.add(node.id);
     if (node.children.isEmpty()) return;
@@ -277,7 +278,7 @@ public final class LayoutEngine {
     if (node.layout.mode == LayoutSpec.Mode.STACK) {
       for (Node child : painted) {
         SizeMm size = box(document, child, node, inner.width, inner.height);
-        arrange(document, child, place(child, inner, size, node, warnings), out, order, warnings);
+        arrange(document, child, place(child, inner, size, node, warnings), out, tracks, order, warnings);
       }
       return;
     }
@@ -288,7 +289,7 @@ public final class LayoutEngine {
         if (i > 0) y += node.layout.rowGapMm;
         SizeMm size = box(document, child, node, inner.width, 0);
         RectMm cell = new RectMm(inner.x, y, inner.width, size.height);
-        arrange(document, child, place(child, cell, size, node, warnings), out, order, warnings);
+        arrange(document, child, place(child, cell, size, node, warnings), out, tracks, order, warnings);
         y += size.height;
       }
       return;
@@ -297,11 +298,13 @@ public final class LayoutEngine {
     double[] rows = resolveTracks(document, node, false, inner.width, inner.height, warnings, columns);
     double[] x = offsets(columns, node.layout.columnGapMm, inner.x, inner.width, node.layout.alignX);
     double[] y = offsets(rows, node.layout.rowGapMm, inner.y, inner.height, node.layout.alignY);
+    tracks.put(node.id, new LayoutResult.Tracks(x, columns, y, rows,
+        node.layout.columnGapMm, node.layout.rowGapMm));
     Map<String, SizeMm> resolved = resolveChildren(document, node, painted, columns, rows, warnings);
     for (Node child : painted) {
       RectMm cell = cell(child, columns, rows, x, y, node.layout);
       arrange(document, child, place(child, cell, resolved.get(child.id), node, warnings),
-          out, order, warnings);
+          out, tracks, order, warnings);
     }
   }
 

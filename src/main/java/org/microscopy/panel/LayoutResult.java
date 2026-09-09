@@ -12,14 +12,39 @@ import java.util.Map;
  * duplication that produced drifting cell maths in the original figure code.
  */
 public final class LayoutResult {
+  /** Where a container placed its grid lines, so a boundary can be grabbed and dragged. */
+  public static final class Tracks {
+    public final double[] columnStart, columnSize, rowStart, rowSize;
+    public final double columnGapMm, rowGapMm;
+
+    Tracks(double[] columnStart, double[] columnSize, double[] rowStart, double[] rowSize,
+        double columnGapMm, double rowGapMm) {
+      this.columnStart = columnStart; this.columnSize = columnSize;
+      this.rowStart = rowStart; this.rowSize = rowSize;
+      this.columnGapMm = columnGapMm; this.rowGapMm = rowGapMm;
+    }
+
+    public int columns() { return columnSize.length; }
+
+    public int rows() { return rowSize.length; }
+
+    public double[] starts(boolean columns) { return columns ? columnStart : rowStart; }
+
+    public double[] sizes(boolean columns) { return columns ? columnSize : rowSize; }
+
+    public double gap(boolean columns) { return columns ? columnGapMm : rowGapMm; }
+  }
+
   private final Map<String, RectMm> rectangles;
+  private final Map<String, Tracks> tracks;
   private final List<String> paintOrder;
   private final List<String> warnings;
   private final RectMm pageBox;
 
-  LayoutResult(Map<String, RectMm> rectangles, List<String> paintOrder, List<String> warnings,
-      RectMm pageBox) {
+  LayoutResult(Map<String, RectMm> rectangles, Map<String, Tracks> tracks, List<String> paintOrder,
+      List<String> warnings, RectMm pageBox) {
     this.rectangles = Collections.unmodifiableMap(new LinkedHashMap<String, RectMm>(rectangles));
+    this.tracks = Collections.unmodifiableMap(new LinkedHashMap<String, Tracks>(tracks));
     this.paintOrder = Collections.unmodifiableList(new ArrayList<String>(paintOrder));
     this.warnings = Collections.unmodifiableList(new ArrayList<String>(warnings));
     this.pageBox = pageBox;
@@ -37,6 +62,9 @@ public final class LayoutResult {
   public boolean has(String nodeId) { return rectangles.containsKey(nodeId); }
 
   public Map<String, RectMm> all() { return rectangles; }
+
+  /** Grid lines of a container, or null when it is not a grid or has no children. */
+  public Tracks tracksOf(String nodeId) { return tracks.get(nodeId); }
 
   /** Back to front, so painting and PPTX shape order agree. */
   public List<String> paintOrder() { return paintOrder; }

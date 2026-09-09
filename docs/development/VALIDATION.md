@@ -279,3 +279,40 @@ ScientificImage ノードを選択したときだけ下部に既存 `ContrastPan
 ### GUI 検証で直したもの
 
 **スクリーンショットが前面の別ウィンドウを写し込んでいた。** `Robot.createScreenCapture` は画面の矩形を撮るため、Poster ウィンドウの手前にあったものが混入した（実際にユーザーのブラウザ画面が入り、当該ファイルは削除済み）。`frame.paint(Graphics)` でウィンドウ自体を描画する方式に変更。前面状態に依存せず、無関係な画面内容も入らない。
+
+## 2026-09-10 (5): キャンバス直接操作（S4 後半）
+
+113 tests, 0 failures, 0 errors。
+
+`LayoutResult` にトラック幾何（`Tracks`: 各列・行の開始位置とサイズ、gap）を追加。キャンバスが境界を掴むために必要だが、座標の単一の真実を保つため engine が arrange で記録したものを渡す方式にした。
+
+構造編集は `DocumentEdits`（画面なしでテスト可能）に分離:
+
+| 操作 | 内容 |
+|---|---|
+| Wrap in a container | ノードを 1x1 コンテナで包む。配置・span・z を引き継ぐ |
+| Split into a row / column | 包んだうえで空セルを隣に追加 |
+| Merge with the next cell | span を広げる。**中身のあるセルは吸収せず拒否**（黙って消さない） |
+| Dissolve this container | 子を親グリッドへ持ち上げ。root は子が 1 つのときのみ |
+| Convert to overlay | Stack 化して z を 0..n に振り直す |
+| Bring forward / Send backward | 同一親内の z のみ |
+| Delete | ノード削除。**元画像には触れない** |
+| setBoundary | 隣接 2 トラックを fraction 化。両側に最低 5% を残す |
+
+キャンバスのジェスチャ: 境界ドラッグ（カーソル変化つき）、セル間ドラッグで移動・入れ替え（ドロップ先をハイライト）、Ctrl+ホイールでズーム、Shift+ドラッグでパン、右クリックメニュー、Delete キー。
+
+### GUI 検証（`PosterUiValidation`、18 項目すべて通過）
+
+| 確認内容 | 結果 |
+|---|---|
+| 境界ドラッグの着地精度 | 期待 446.4 mm に対し実測 446.4 mm（誤差 0.01 mm 未満） |
+| 占有セルへの移動 | 2 つが入れ替わる |
+| Delete | パネルが 1 つ減り、元 TIFF の SHA-256 は不変 |
+
+副次的に、過剰制約の警告が実運用で働くことも確認できた。列を 80% に広げるとアスペクト固定の行が A1 の高さを超え、ステータスバーに `Panels: the rows need 1016 mm but only 754 mm is available; reduce a track, lower the page size or drop an aspect ratio.` と出る。
+
+### 未実装（S4 のうち）
+
+- 端ハンドルによる Fixed 化リサイズ（グリッド優先の方針では境界ドラッグで代替できるため後回し）
+- Style の drag & drop 適用（S7 待ち）
+- 複数選択・マーキー選択

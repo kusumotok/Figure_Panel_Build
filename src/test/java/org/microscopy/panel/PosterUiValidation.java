@@ -106,6 +106,41 @@ public final class PosterUiValidation {
     check("Reopened the project from its own PPTX", frame[0].document() != null
         && child(frame[0].document().page(0).rootNode, "Panels").children.size() == 6);
 
+    // Direct manipulation. Reopening replaced the document, so the nodes are looked up again.
+    final Node livePanels = child(frame[0].document().page(0).rootNode, "Panels");
+    final Node target = livePanels.children.get(0);
+    LayoutResult.Tracks columnsBefore = frame[0].layoutResult().tracksOf(livePanels.id);
+    final double span = columnsBefore.columnSize[0] + columnsBefore.columnSize[1];
+    SwingUtilities.invokeAndWait(() -> {
+      DocumentEdits.setBoundary(livePanels, true, 0, span * 0.8, span * 0.2);
+      frame[0].show(frame[0].document(), inputs);
+    });
+    pause();
+    double widthAfter = frame[0].layoutResult().of(target.id).width;
+    RESULTS.add(String.format("     boundary drag: expected %.1f mm, got %.1f mm", span * 0.8, widthAfter));
+    check("Dragging a boundary lands the column where it was dropped",
+        Math.abs(widthAfter - span * 0.8) < 0.01);
+    shot(frame[0], folder.resolve("07-boundary.png"));
+
+    final Node other = livePanels.children.get(1);
+    final int wasRow = target.placement.row, wasColumn = target.placement.column;
+    SwingUtilities.invokeAndWait(() -> {
+      DocumentEdits.moveTo(frame[0].document().page(0), target.id,
+          other.placement.row, other.placement.column);
+      frame[0].show(frame[0].document(), inputs);
+    });
+    pause();
+    check("Moving onto an occupied cell swaps the two",
+        other.placement.row == wasRow && other.placement.column == wasColumn);
+
+    SwingUtilities.invokeAndWait(() -> {
+      frame[0].selectNode(other.id);
+      frame[0].deleteSelected();
+    });
+    pause();
+    check("Delete removes the panel", livePanels.children.size() == 5);
+    check("Source TIFFs survive a delete", java.util.Arrays.equals(hashes, hashes(folder)));
+
     // The figure mode contrast panel, reused for the selected image.
     SwingUtilities.invokeAndWait(() -> frame[0].selectNode(firstPanel.id));
     pause();
