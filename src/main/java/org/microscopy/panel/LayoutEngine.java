@@ -301,7 +301,14 @@ public final class LayoutEngine {
     tracks.put(node.id, new LayoutResult.Tracks(x, columns, y, rows,
         node.layout.columnGapMm, node.layout.rowGapMm));
     Map<String, SizeMm> resolved = resolveChildren(document, node, painted, columns, rows, warnings);
+    LayoutResult.Tracks lines = tracks.get(node.id);
     for (Node child : painted) {
+      RectMm region = regionBounds(child, lines);
+      if (region != null) {
+        // A text node with a flow region occupies the cells it names, not the one it sits in.
+        arrange(document, child, region, out, tracks, order, warnings);
+        continue;
+      }
       RectMm cell = cell(child, columns, rows, x, y, node.layout);
       arrange(document, child, place(child, cell, resolved.get(child.id), node, warnings),
           out, tracks, order, warnings);
@@ -462,5 +469,22 @@ public final class LayoutEngine {
     else if (child.size.height.kind == SizeExpr.Kind.FIXED) h = child.size.height.value;
     else h = intrinsic.height;
     return new SizeMm(child.size.width.clamp(w), child.size.height.clamp(h));
+  }
+
+  /** Bounding box of a flow region, or null when the child is an ordinary cell. */
+  static RectMm regionBounds(Node child, LayoutResult.Tracks tracks) {
+    if (tracks == null || child.content.kind != Content.Kind.TEXT) return null;
+    FlowRegion region = child.content.text.flowRegion;
+    if (region == null || region.cells.isEmpty()) return null;
+    List<FlowRegionGeometry.Island> islands = FlowRegionGeometry.islands(tracks, region);
+    if (islands.isEmpty()) return null;
+    RectMm bounds = islands.get(0).bounds();
+    for (FlowRegionGeometry.Island island : islands) {
+      RectMm other = island.bounds();
+      double left = Math.min(bounds.x, other.x), top = Math.min(bounds.y, other.y);
+      bounds = new RectMm(left, top, Math.max(bounds.right(), other.right()) - left,
+          Math.max(bounds.bottom(), other.bottom()) - top);
+    }
+    return bounds;
   }
 }

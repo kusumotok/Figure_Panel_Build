@@ -53,7 +53,7 @@ public final class NodeRenderer {
       if (isHidden(node)) continue;
       int[] px = rect.toPx(target.dpi);
       paintNode(g, document, node, px[0] - originPxX, px[1] - originPxY,
-          Math.max(1, px[2]), Math.max(1, px[3]), target);
+          Math.max(1, px[2]), Math.max(1, px[3]), target, shapesFor(page, layout, node, rect, target));
     }
   }
 
@@ -68,7 +68,7 @@ public final class NodeRenderer {
   }
 
   private void paintNode(Graphics2D g, Document document, Node node, int x, int y,
-      int width, int height, RenderTarget target) {
+      int width, int height, RenderTarget target, java.util.List<TextRenderer.FlowShape> shapes) {
     background(g, node, x, y, width, height);
     switch (node.content.kind) {
       case SCIENTIFIC_IMAGE:
@@ -79,7 +79,7 @@ public final class NodeRenderer {
         if (picture != null) g.drawImage(picture, x, y, width, height, null);
         break;
       case TEXT:
-        paintText(g, node, x, y, width, height, target);
+        paintText(g, node, x, y, width, height, target, shapes);
         break;
       case SHAPE:
         paintShape(g, node, x, y, width, height);
@@ -155,7 +155,7 @@ public final class NodeRenderer {
   }
 
   private void paintText(Graphics2D g, Node node, int x, int y, int width, int height,
-      RenderTarget target) {
+      RenderTarget target, java.util.List<TextRenderer.FlowShape> shapes) {
     TextContent content = node.content.text;
     Graphics2D local = (Graphics2D) g.create();
     try {
@@ -174,10 +174,13 @@ public final class NodeRenderer {
       } else {
         local.translate(x, y);
       }
-      TextRenderer.Flowed flowed =
-          text.flow(local, content, boxWidth, boxHeight, target.dpi, Align.START);
-      // Vertically centre the block, matching how figure labels sit in their band.
-      local.translate(0, Math.max(0, (boxHeight - flowed.usedHeight) / 2.0));
+      TextRenderer.Flowed flowed = shapes != null && !shapes.isEmpty()
+          ? text.flow(local, content, shapes, target.dpi, Align.START)
+          : text.flow(local, content, boxWidth, boxHeight, target.dpi, Align.START);
+      // A box centres its block, matching how figure labels sit in their band. A region has
+      // already placed every line where it belongs.
+      if (shapes == null || shapes.isEmpty())
+        local.translate(0, Math.max(0, (boxHeight - flowed.usedHeight) / 2.0));
       text.draw(local, flowed);
     } finally {
       local.dispose();
@@ -203,5 +206,29 @@ public final class NodeRenderer {
   public AffineTransform pageToPixels(double dpi) {
     double scale = dpi / Units.MM_PER_INCH;
     return AffineTransform.getScaleInstance(scale, scale);
+  }
+
+  /**
+   * Where a text node may put its lines. A plain box uses its own rectangle; a node with a flow
+   * region uses the islands of that region, so the text runs down beside a figure and widens
+   * where the figure ends rather than being clipped into a column.
+   */
+  private static java.util.List<TextRenderer.FlowShape> shapesFor(Page page, LayoutResult layout,
+      Node node, RectMm rect, RenderTarget target) {
+    if (node.content.kind != Content.Kind.TEXT) return null;
+    FlowRegion region = node.content.text.flowRegion;
+    // A region and a right angle together have no sensible meaning; the region wins.
+    if (region == null || region.cells.isEmpty()
+        || node.content.text.rotation != TextContent.Rotation.NONE) return null;
+    Node parent = page.rootNode.parentOf(node.id);
+    LayoutResult.Tracks tracks = parent == null ? null : layout.tracksOf(parent.id);
+    if (tracks == null) return null;
+    java.util.List<FlowRegionGeometry.Island> islands =
+        FlowRegionGeometry.ordered(FlowRegionGeometry.islands(tracks, region), region);
+    java.util.List<TextRenderer.FlowShape> shapes =
+        new java.util.ArrayList<TextRenderer.FlowShape>();
+    for (FlowRegionGeometry.Island island : islands)
+      shapes.add(TextRenderer.island(island, rect.x, rect.y, target.dpi));
+    return shapes;
   }
 }
