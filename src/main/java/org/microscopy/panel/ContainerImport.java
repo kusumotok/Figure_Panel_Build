@@ -140,4 +140,30 @@ public final class ContainerImport {
     int dot = name.lastIndexOf('.');
     return dot < 0 ? "" : name.substring(dot + 1).toUpperCase(java.util.Locale.ROOT);
   }
+
+  /**
+   * Which image each series lands in, and as which channel. Skipping a single failed capture
+   * shifts everything after it, so the grouping has to be visible before it is applied rather
+   * than inferred from a rule.
+   *
+   * @return image number and channel label per series index, or null for a skipped series
+   */
+  public static String[] grouping(Plan plan) {
+    String[] assignment = new String[plan.series.size()];
+    List<BioFormatsReader.Series> kept = plan.kept();
+    for (int i = 0; i < kept.size(); i++) {
+      int image = plan.channelsPerImage < 1 ? 0 : i / plan.channelsPerImage;
+      int channel = plan.channelsPerImage < 1 ? 0 : i % plan.channelsPerImage;
+      boolean complete = plan.channelsPerImage > 0
+          && i < kept.size() - plan.remainder();
+      String label = channel < plan.channelLabels.size()
+          ? plan.channelLabels.get(channel) : "Channel " + (channel + 1);
+      String text = plan.channelsPerImage == 1 ? "Image " + (image + 1)
+          : "Image " + (image + 1) + " / " + label;
+      for (int row = 0; row < plan.series.size(); row++)
+        if (plan.series.get(row).index == kept.get(i).index)
+          assignment[row] = complete ? text : "left over";
+    }
+    return assignment;
+  }
 }

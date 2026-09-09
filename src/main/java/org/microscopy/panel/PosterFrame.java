@@ -50,6 +50,7 @@ public class PosterFrame extends JFrame {
     });
 
     JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
+    button(toolbar, "Add images...", "addImages", () -> addImagesFromContainer());
     button(toolbar, "Import figure settings...", "importSettings", () -> importSettings());
     button(toolbar, "Open project PPTX...", "openProject", () -> openProject());
     button(toolbar, "Save project", "saveProject", () -> saveProject(false));
@@ -380,5 +381,80 @@ public class PosterFrame extends JFrame {
     selectedId = document.page(0).rootNode.id;
     relayout(true);
     status.setText(opened.message);
+  }
+
+  /**
+   * Reads a Bio-Formats container, lets the user choose and group its series, and places the
+   * result as a grid of panels under the current selection.
+   */
+  public void addImagesFromContainer() {
+    File file = choose("Add images from a container", "lif",
+        "Microscopy container (*.lif, *.nd2, *.oib, *.oir, *.czi, *.tif)", false);
+    if (file == null) return;
+    if (!BioFormatsReader.available())
+      throw new IllegalArgumentException("Bio-Formats is not available. Run this from inside Fiji,"
+          + " or convert the file to TIFF first.");
+    ContainerImport.Plan plan = ContainerImportDialog.choose(this, file);
+    if (plan == null) return;
+    addImages(file, plan);
+  }
+
+  /** The same import without dialogs, so it can be driven from a script or a check. */
+  public void addImages(File file, ContainerImport.Plan plan) {
+    if (document == null) startEmptyDocument();
+    library.use(document);
+    setCursor(java.awt.Cursor.getPredefinedCursor(java.awt.Cursor.WAIT_CURSOR));
+    try {
+      List<Asset> placeable = new ContainerImport().apply(document, plan);
+      place(placeable);
+      status.setText("Added " + placeable.size() + " image(s) from " + file.getName() + ".");
+    } finally {
+      setCursor(java.awt.Cursor.getDefaultCursor());
+    }
+    relayout(true);
+  }
+
+  private void startEmptyDocument() {
+    document = Document.empty();
+    Page page = document.page(0);
+    page.name = "Page 1";
+    page.size = PagePresets.byName(PagePresets.JOURNAL_DOUBLE_COLUMN).toPageSize();
+    page.margins = Margins.uniform(5);
+    page.rootNode = Node.container("Page", 1, 1);
+    projectFile = null;
+    selectedId = page.rootNode.id;
+  }
+
+  /** Lays new panels out as a grid under the selected container, or under the page root. */
+  private void place(List<Asset> assets) {
+    Node target = document.page(0).rootNode.find(selectedId);
+    if (target == null || target.content.kind != Content.Kind.NONE)
+      target = document.page(0).rootNode;
+    int existing = target.children.size();
+    int total = existing + assets.size();
+    int columns = Math.min(total, 4);
+    int rows = (total + columns - 1) / columns;
+    target.layout = LayoutSpec.grid(rows, columns);
+    target.layout.columnGapMm = 4;
+    target.layout.rowGapMm = 4;
+    for (int i = 0; i < columns; i++) target.layout.columns.set(i, SizeExpr.fill());
+    for (int i = 0; i < existing; i++) {
+      Node child = target.children.get(i);
+      child.placement.row = i / columns;
+      child.placement.column = i % columns;
+    }
+    for (int i = 0; i < assets.size(); i++) {
+      Asset asset = assets.get(i);
+      Node node = Node.leaf(asset.seriesName == null || asset.seriesName.isEmpty()
+          ? "Image " + (existing + i + 1) : asset.seriesName,
+          Content.of(NewImageContent.forAsset(asset.id, library.source(asset.id, 1, 1))));
+      node.size.width = SizeExpr.fill();
+      // Aspect keeps the pixels square however the columns are later resized.
+      node.size.height = SizeExpr.aspectRatio(asset.sizeY / (double) asset.sizeX);
+      int index = existing + i;
+      target.add(node, index / columns, index % columns);
+    }
+    document.validate();
+    selectedId = target.id;
   }
 }

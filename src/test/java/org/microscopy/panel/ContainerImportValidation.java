@@ -65,6 +65,8 @@ public final class ContainerImportValidation {
     System.out.printf("rendered 1024x1024 merge in %.2f s%n", (System.nanoTime() - started) / 1e9);
     ImageIO.write(rendered, "png", out.resolve("lif-merge.png").toFile());
     System.out.println("wrote " + out.resolve("lif-merge.png").toAbsolutePath());
+
+    wholeFigure(file, out);
   }
 
   private static FigureConfiguration mergeConfig(InputImageManager.Source source) {
@@ -95,4 +97,63 @@ public final class ContainerImportValidation {
     return config;
   }
 
+
+  /** Places every grouped image on a page and writes the project and a print export. */
+  static void wholeFigure(File file, Path out) throws Exception {
+    ContainerImport importer = new ContainerImport();
+    ContainerImport.Plan plan = importer.plan(file);
+    plan.skipNamesContaining("x");
+    plan.channelsPerImage = 3;
+    plan.channelLabels.add("Green");
+    plan.channelLabels.add("Red");
+    plan.channelLabels.add("Blue");
+    // Drop whatever does not complete a group, which is what the dialog asks the user to resolve.
+    while (plan.remainder() != 0) {
+      List<BioFormatsReader.Series> kept = plan.kept();
+      plan.skipped.add(Integer.valueOf(kept.get(kept.size() - 1).index));
+    }
+    System.out.println("placing " + plan.imageCount() + " images of 3 channels");
+
+    final PosterFrame[] frame = new PosterFrame[1];
+    javax.swing.SwingUtilities.invokeAndWait(() -> frame[0] = new PosterFrame());
+    long started = System.nanoTime();
+    javax.swing.SwingUtilities.invokeAndWait(() -> frame[0].addImages(file, plan));
+    System.out.printf("imported and laid out in %.1f s%n", (System.nanoTime() - started) / 1e9);
+    Document document = frame[0].document();
+    System.out.println("assets: " + document.assets.size() + ", status: " + frame[0].statusText());
+
+    File pptx = out.resolve("lif-figure.pptx").toFile();
+    started = System.nanoTime();
+    javax.swing.SwingUtilities.invokeAndWait(() -> {
+      try {
+        frame[0].saveProjectTo(pptx);
+      } catch (Exception ex) {
+        throw new RuntimeException(ex);
+      }
+    });
+    System.out.printf("saved project in %.1f s (%.1f MB)%n",
+        (System.nanoTime() - started) / 1e9, pptx.length() / 1e6);
+
+    File png = out.resolve("lif-figure-300dpi.png").toFile();
+    started = System.nanoTime();
+    javax.swing.SwingUtilities.invokeAndWait(() -> {
+      try {
+        frame[0].exportPngTo(png, RenderTarget.PRINT_DPI);
+      } catch (Exception ex) {
+        throw new RuntimeException(ex);
+      }
+    });
+    System.out.printf("exported 300 dpi PNG in %.1f s (%.1f MB)%n",
+        (System.nanoTime() - started) / 1e9, png.length() / 1e6);
+    File small = out.resolve("lif-figure-preview.png").toFile();
+    javax.swing.SwingUtilities.invokeAndWait(() -> {
+      try {
+        frame[0].exportPngTo(small, 50);
+      } catch (Exception ex) {
+        throw new RuntimeException(ex);
+      }
+    });
+    System.out.println("preview: " + small.getAbsolutePath());
+    javax.swing.SwingUtilities.invokeAndWait(() -> frame[0].dispose());
+  }
 }

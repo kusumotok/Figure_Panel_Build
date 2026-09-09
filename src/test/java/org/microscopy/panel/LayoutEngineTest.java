@@ -203,4 +203,27 @@ class LayoutEngineTest {
     assertTrue(result.warnings().toString().contains("the rows need 160 mm but only 100 mm"),
         result.warnings().toString());
   }
+
+  @Test
+  void anAutoHeightPageFitsAspectLockedPanelsWithoutGaps() {
+    Node root = Node.container("Panels", 2, 2);
+    root.layout.columnGapMm = 4;
+    root.layout.rowGapMm = 4;
+    for (int i = 0; i < 2; i++) root.layout.columns.set(i, SizeExpr.fill());
+    for (int i = 0; i < 4; i++) {
+      Node panel = cell("Panel " + i);
+      panel.size.height = SizeExpr.aspectRatio(1);
+      root.add(panel, i / 2, i % 2);
+    }
+    Document document = Document.empty();
+    document.page(0).size = PageSize.fixedWidth(100);
+    document.page(0).rootNode = root;
+    LayoutResult result = new LayoutEngine().layout(document);
+    // Two square panels across 100 mm with one 4 mm gap are 48 mm each, so two rows plus the
+    // gap make exactly 100 mm; the page must not grow past that.
+    assertEquals(48, result.of(root.children.get(0).id).width, EPSILON);
+    assertEquals(48, result.of(root.children.get(0).id).height, EPSILON);
+    assertEquals(100, result.pageBox().height, EPSILON);
+    assertTrue(result.warnings().isEmpty(), result.warnings().toString());
+  }
 }

@@ -218,3 +218,50 @@ resave : 0.14 s, 0 rendered / 6 reused
 
 - **Fiji 実機での確認が未実施。** `C:\Program Files\Fiji\plugins` は BUILTIN\Users が読み取り専用のため、管理者権限での jar コピーが必要。コピー後に Fiji MCP で `Plugins > Poster / Layout Builder` の起動確認を行う。
 - キャンバス上のドラッグ編集（分割・結合・トラック境界ドラッグ）は未実装。現時点の編集は Inspector の数値入力のみ。
+
+## 2026-09-10 (3): Composite asset と Bio-Formats 取り込み（S5）
+
+合計 103 tests, 0 failures, 0 errors。既存 `org.microscopy.figure` は引き続き無変更。
+
+### 設計判断：composite asset
+
+実データ（Leica lif）が「1 series = 1 蛍光チャネル、3 series で 1 視野」だったため、**series をまたいだ Merge** が必須と判明。既存 `FigureConfiguration` は「1 セル = 1 ソース」前提なので、それを壊さずに実現するため **composite asset**（複数ソースの各 1 チャネルを束ねた仮想アセット）を導入した。レンダラからは通常の多チャネルソースに見えるため、B&C・LUT・Merge・スケールバー・Inset の実装が一切変わらない。
+
+- composite は 1 段のみ（composite の composite を禁止）
+- 全 part が同じピクセルグリッドであることを `Document.validate()` で検査
+- part 側の calibration を継承（合成画像でもスケールバーが引ける）
+
+Bio-Formats は **reflection 経由**（Fiji 同梱・GPL、依存に加えるとオフラインビルドとライセンス境界が崩れる）。未検出時は「Fiji 内で実行するか TIFF に変換」と案内して degrade。
+
+`AssetLibrary` にバイト予算つき LRU を追加（既定 512 MB）。Fiji で開いている画像は退避不可なので pin、ファイル由来のみ evict。
+
+### 実データ検証（`ContainerImportValidation`、285 MB / 34 series の lif）
+
+```
+listed 34 series in 0.58 s          ← メタデータのみ
+composite: 3 series -> C=3 2048x2048, assembled in 0.70 s
+rendered 1024x1024 merge in 0.13 s
+placing 9 images of 3 channels
+imported and laid out in 3.2 s      ← 27 series の復号 + オートレンジ含む
+status: 180 x 137 mm | All 9 pictures reach 300 dpi or better.
+saved project in 0.3 s (1.1 MB)
+exported 300 dpi PNG in 0.3 s (4.7 MB)
+```
+
+2048 px を 43 mm に配置すると約 1200 dpi になるため、合成 TIFF（256 px）のときと違い解像度警告が出ないことも確認できた。出力は `artifacts/container/`（Git 管理外）。
+
+### 検証で見つけて直した不具合
+
+**measure パスで列が未解決のまま行を計測していた。** Fill の子に幅が渡らず、300 dpi 相当の固有サイズ（2048 px = 173 mm）にフォールバックして行高が決まり、ページが 180 x 538 mm に膨張していた（正しくは 180 x 137 mm）。幅が既知のときは measure でも列を配分してから行を測るよう修正。回帰テスト追加済み。
+
+### 実データから分かった運用上の注意
+
+失敗撮影が **1 本だけ**混ざると「残りを 3 つごと」でグループ化した際に**以降の位相がずれ**、別視野のチャネルが 1 枚に混ざる。この lif では `Series003x` の 1 本だけが失敗しているため、単純な後方グループ化では 004/005/006 が 1 視野として合成されてしまう（実際に色構成のばらついたパネルとして再現した）。
+
+規則で推測せず、取り込みダイアログに **Becomes 列**（各 series がどの画像のどのチャネルになるか）を表示して、実行前に目で確認・修正できるようにした。`ContainerImportTest` でこの位相ずれと、視野ごと 3 本失敗した場合は位相が保たれることを両方固定している。
+
+### 未実施
+
+- 取り込みダイアログの実機操作確認（jar 再インストールが必要）
+- multi-channel / multi-Z / multi-T を含む lif での検証（手元のファイルは全 series が C=1 Z=1 T=1）
+- Portable（選択 series の OME-TIFF 埋め込み）

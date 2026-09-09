@@ -110,7 +110,12 @@ public final class LayoutEngine {
       }
       return new SizeMm(width, height);
     }
-    double[] columns = trackBases(document, node, true, innerWidth, innerHeight, null);
+    // When the width is already known, share it out before measuring rows. Otherwise a Fill
+    // child is offered nothing, falls back to its intrinsic print size, and an aspect ratio
+    // turns that into a wildly too tall row.
+    double[] columns = innerWidth > 0
+        ? resolveTracks(document, node, true, innerWidth, innerHeight, new ArrayList<String>(), null)
+        : trackBases(document, node, true, innerWidth, innerHeight, null);
     double[] rows = trackBases(document, node, false, innerWidth, innerHeight, columns);
     return new SizeMm(total(columns, node.layout.columnGapMm), total(rows, node.layout.rowGapMm));
   }
