@@ -36,9 +36,12 @@ public class TextRenderer {
   public static final class Line {
     public final TextLayout layout;
     public final float x, baseline;
+    /** Which paragraph this line came from, and the character range it consumed. */
+    public final int paragraph, start, limit;
 
-    Line(TextLayout layout, float x, float baseline) {
+    Line(TextLayout layout, float x, float baseline, int paragraph, int start, int limit) {
       this.layout = layout; this.x = x; this.baseline = baseline;
+      this.paragraph = paragraph; this.start = start; this.limit = limit;
     }
   }
 
@@ -123,7 +126,8 @@ public class TextRenderer {
     double y = shapes.get(0).top();
     boolean clip = content.overflow == TextContent.Overflow.CLIP;
 
-    for (Paragraph paragraph : content.paragraphs) {
+    for (int index = 0; index < content.paragraphs.size(); index++) {
+      Paragraph paragraph = content.paragraphs.get(index);
       Align align = paragraph.align == null ? defaultAlign : paragraph.align;
       double sizePt = largestFontPt(paragraph) * scale;
       double lineHeight = ptToPx(sizePt, dpi) * 1.2;
@@ -160,13 +164,14 @@ public class TextRenderer {
         for (double[] run : runs) {
           if (measurer.getPosition() >= iterator.getEndIndex()) break;
           double available = Math.max(1, run[1] - run[0]);
+          int from = measurer.getPosition();
           TextLayout layout = measurer.nextLayout((float) available);
           if (layout == null) break;
           double offset = 0;
           if (align == Align.CENTER) offset = (available - layout.getAdvance()) / 2;
           else if (align == Align.END) offset = available - layout.getAdvance();
           flowed.lines.add(new Line(layout, (float) (run[0] + offset),
-              (float) (y + layout.getAscent())));
+              (float) (y + layout.getAscent()), index, from, measurer.getPosition()));
           tallest = Math.max(tallest,
               layout.getAscent() + layout.getDescent() + layout.getLeading());
         }

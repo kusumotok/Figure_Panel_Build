@@ -51,7 +51,9 @@ final class PptxShapeBuilder {
           picture(slide, document, node, rect, dpi, qualityLabel, cache, relByName);
           break;
         case TEXT:
-          text(slide, node, rect);
+          if (node.content.text.flowRegion == null || node.content.text.flowRegion.cells.isEmpty())
+            text(slide, node, rect, node.content.text.paragraphs, name(node));
+          else regionText(slide, page, layout, node, rect);
           break;
         case SHAPE:
           shape(slide, node, rect);
@@ -174,7 +176,8 @@ final class PptxShapeBuilder {
    * Text stays editable. Rotation is emitted the way PowerPoint expects it: the box is given the
    * swapped extent about the same centre, then turned by a right angle.
    */
-  private void text(Slide slide, Node node, RectMm rect) {
+  private void text(Slide slide, Node node, RectMm rect, java.util.List<Paragraph> paragraphs,
+      String shapeName) {
     TextContent content = node.content.text;
     int rotation = 0;
     RectMm box = rect;
@@ -183,15 +186,15 @@ final class PptxShapeBuilder {
       double cx = rect.x + rect.width / 2, cy = rect.y + rect.height / 2;
       box = new RectMm(cx - rect.height / 2, cy - rect.width / 2, rect.height, rect.width);
     }
-    StringBuilder paragraphs = new StringBuilder();
-    for (Paragraph paragraph : content.paragraphs) {
-      paragraphs.append("<a:p><a:pPr algn=\"").append(align(paragraph.align)).append("\"/>");
-      for (Run run : paragraph.runs) paragraphs.append(run(node, run));
-      paragraphs.append("</a:p>");
+    StringBuilder body = new StringBuilder();
+    for (Paragraph paragraph : paragraphs) {
+      body.append("<a:p><a:pPr algn=\"").append(align(paragraph.align)).append("\"/>");
+      for (Run run : paragraph.runs) body.append(run(node, run));
+      body.append("</a:p>");
     }
-    if (content.paragraphs.isEmpty()) paragraphs.append("<a:p/>");
+    if (paragraphs.isEmpty()) body.append("<a:p/>");
     slide.shapes.append("<p:sp><p:nvSpPr><p:cNvPr id=\"").append(nextId++)
-        .append("\" name=\"").append(Ooxml.xml(name(node)))
+        .append("\" name=\"").append(Ooxml.xml(shapeName))
         .append("\" descr=\"").append(Ooxml.xml(node.id))
         .append("\"/><p:cNvSpPr txBox=\"1\"/><p:nvPr/></p:nvSpPr><p:spPr>")
         .append(Ooxml.transform(box, rotation))
@@ -199,7 +202,7 @@ final class PptxShapeBuilder {
         .append(fill(node)).append(outline(node)).append("</p:spPr>")
         .append("<p:txBody><a:bodyPr wrap=\"square\" lIns=\"0\" rIns=\"0\" tIns=\"0\" bIns=\"0\"")
         .append(" anchor=\"ctr\"><a:noAutofit/></a:bodyPr><a:lstStyle/>")
-        .append(paragraphs).append("</p:txBody></p:sp>");
+        .append(body).append("</p:txBody></p:sp>");
   }
 
   private static String align(Align align) {
@@ -248,5 +251,74 @@ final class PptxShapeBuilder {
   private static int readInt(byte[] bytes, int offset) {
     return (bytes[offset] & 255) << 24 | (bytes[offset + 1] & 255) << 16
         | (bytes[offset + 2] & 255) << 8 | (bytes[offset + 3] & 255);
+  }
+
+  /**
+   * PowerPoint has no non-rectangular text frame, so a flow region is written as one editable
+   * text box per rectangle of the region. The region itself is kept losslessly in the project
+   * part, so nothing is lost; what changes is that the split between boxes is fixed at save time
+   * and PowerPoint reflows within each box rather than across the whole L.
+   *
+   * <p>The parts are named nodeId#partN so that reading edits back can skip them: putting text
+   * from several boxes back into one flowing paragraph has no unique answer.
+   */
+  private void regionText(Slide slide, Page page, LayoutResult layout, Node node, RectMm rect) {
+    TextContent content = node.content.text;
+    Node parent = page.rootNode.parentOf(node.id);
+    LayoutResult.Tracks tracks = parent == null ? null : layout.tracksOf(parent.id);
+    if (tracks == null) {
+      text(slide, node, rect, content.paragraphs, name(node));
+      return;
+    }
+    List<FlowRegionGeometry.Island> islands = FlowRegionGeometry.ordered(
+        FlowRegionGeometry.islands(tracks, content.flowRegion), content.flowRegion);
+    List<RectMm> boxes = new ArrayList<RectMm>();
+    List<TextRenderer.FlowShape> shapes = new ArrayList<TextRenderer.FlowShape>();
+    double dpi = 150;
+    for (FlowRegionGeometry.Island island : islands) {
+      boxes.addAll(island.rectangles);
+      shapes.add(TextRenderer.island(island, rect.x, rect.y, dpi));
+    }
+    if (boxes.size() <= 1) {
+      text(slide, node, boxes.isEmpty() ? rect : boxes.get(0), content.paragraphs, name(node));
+      return;
+    }
+    java.awt.Graphics2D scratch =
+        new BufferedImage(1, 1, BufferedImage.TYPE_INT_RGB).createGraphics();
+    TextRenderer.Flowed flowed;
+    try {
+      flowed = new TextRenderer().flow(scratch, content, shapes, dpi, Align.START);
+    } finally {
+      scratch.dispose();
+    }
+    int part = 0;
+    for (RectMm box : boxes) {
+      List<Paragraph> pieces = piecesIn(content, flowed, box, rect, dpi);
+      part++;
+      if (pieces.isEmpty()) continue;
+      text(slide, node, box, pieces, name(node) + "#part" + part);
+    }
+  }
+
+  /** The paragraphs whose lines landed inside one rectangle, sliced to just those characters. */
+  private static List<Paragraph> piecesIn(TextContent content, TextRenderer.Flowed flowed,
+      RectMm box, RectMm origin, double dpi) {
+    List<Paragraph> pieces = new ArrayList<Paragraph>();
+    int currentParagraph = -1, from = -1, to = -1;
+    for (TextRenderer.Line line : flowed.lines) {
+      double xMm = origin.x + Units.pxToMm(line.x, dpi);
+      double yMm = origin.y + Units.pxToMm(line.baseline - line.layout.getAscent() / 2, dpi);
+      if (!box.contains(xMm, yMm)) continue;
+      if (line.paragraph != currentParagraph) {
+        if (currentParagraph >= 0)
+          pieces.add(content.paragraphs.get(currentParagraph).slice(from, to));
+        currentParagraph = line.paragraph;
+        from = line.start;
+      }
+      to = line.limit;
+    }
+    if (currentParagraph >= 0)
+      pieces.add(content.paragraphs.get(currentParagraph).slice(from, to));
+    return pieces;
   }
 }
