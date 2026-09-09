@@ -1,0 +1,155 @@
+package org.microscopy.panel;
+
+import java.awt.Rectangle;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.security.MessageDigest;
+import java.util.ArrayList;
+import java.util.List;
+import javax.imageio.ImageIO;
+import javax.swing.SwingUtilities;
+import org.microscopy.figure.InputImageManager;
+
+/**
+ * Drives the poster window in a separate process, the way the existing figure validations do.
+ * Never touches the user's Fiji windows and never writes to the source TIFFs.
+ */
+public final class PosterUiValidation {
+  private static final List<String> RESULTS = new ArrayList<String>();
+
+  public static void main(String[] args) throws Exception {
+    Path folder = Paths.get("artifacts", "poster-ui");
+    Files.createDirectories(folder);
+    InputImageManager inputs = new InputImageManager();
+    final Document document = PanelFixtures.poster(folder, inputs, 3, 2);
+    final String[] hashes = hashes(folder);
+
+    final PosterFrame[] frame = new PosterFrame[1];
+    SwingUtilities.invokeAndWait(() -> {
+      frame[0] = new PosterFrame();
+      frame[0].setVisible(true);
+      frame[0].show(document, inputs);
+    });
+    pause();
+    shot(frame[0], folder.resolve("01-opened.png"));
+    check("Page laid out", frame[0].layoutResult() != null);
+    check("Status reports size and resolution",
+        frame[0].statusText().contains("mm") && frame[0].statusText().contains("dpi"));
+
+    final Node panels = child(document.page(0).rootNode, "Panels");
+    final Node firstPanel = panels.children.get(0);
+    SwingUtilities.invokeAndWait(() -> frame[0].selectNode(firstPanel.id));
+    pause();
+    shot(frame[0], folder.resolve("02-panel-selected.png"));
+    check("Selected the panel", firstPanel.id.equals(frame[0].selectedNodeId()));
+
+    SwingUtilities.invokeAndWait(() -> frame[0].parentOfSelection());
+    pause();
+    check("Escape walks up to the container", panels.id.equals(frame[0].selectedNodeId()));
+    SwingUtilities.invokeAndWait(() -> frame[0].firstChildOfSelection());
+    pause();
+    check("Enter walks back down", firstPanel.id.equals(frame[0].selectedNodeId()));
+    SwingUtilities.invokeAndWait(() -> frame[0].nextSiblingOfSelection());
+    pause();
+    check("Tab moves along the siblings",
+        panels.children.get(1).id.equals(frame[0].selectedNodeId()));
+    shot(frame[0], folder.resolve("03-breadcrumb.png"));
+
+    // Change the layout through the model the inspector edits, then confirm it took effect.
+    double before = frame[0].layoutResult().of(firstPanel.id).width;
+    SwingUtilities.invokeAndWait(() -> {
+      panels.layout.columns.set(0, SizeExpr.fraction(2));
+      frame[0].show(frame[0].document(), inputs);
+      frame[0].selectNode(firstPanel.id);
+    });
+    pause();
+    double after = frame[0].layoutResult().of(firstPanel.id).width;
+    double ratio = after / before;
+    RESULTS.add(String.format("     track 1fr -> 2fr: %.1f mm -> %.1f mm (x%.3f)", before, after, ratio));
+    // Two equal tracks share the width 1:1; making one 2fr moves it to 2:3 of the same span.
+    check("A 2fr track widens the panel to the expected share", Math.abs(ratio - 4.0 / 3.0) < 0.02);
+    shot(frame[0], folder.resolve("04-two-fr.png"));
+
+    File pptx = folder.resolve("poster.pptx").toFile();
+    final PptxProjectWriter.Saved[] saved = new PptxProjectWriter.Saved[1];
+    SwingUtilities.invokeAndWait(() -> {
+      try {
+        saved[0] = frame[0].saveProjectTo(pptx);
+      } catch (Exception ex) {
+        throw new RuntimeException(ex);
+      }
+    });
+    check("Saved a project PPTX", pptx.isFile() && saved[0].slides == 1);
+    check("Save stayed at preview size", saved[0].bytes < 20000000L);
+
+    File png = folder.resolve("poster-300dpi.png").toFile();
+    SwingUtilities.invokeAndWait(() -> {
+      try {
+        frame[0].exportPngTo(png, RenderTarget.PRINT_DPI);
+      } catch (Exception ex) {
+        throw new RuntimeException(ex);
+      }
+    });
+    check("Exported a 300 dpi PNG", png.isFile() && png.length() > 0);
+
+    SwingUtilities.invokeAndWait(() -> {
+      try {
+        frame[0].openProjectFile(pptx);
+      } catch (Exception ex) {
+        throw new RuntimeException(ex);
+      }
+    });
+    pause();
+    shot(frame[0], folder.resolve("05-reopened.png"));
+    check("Reopened the project from its own PPTX", frame[0].document() != null
+        && child(frame[0].document().page(0).rootNode, "Panels").children.size() == 6);
+
+    check("Source TIFFs unchanged", java.util.Arrays.equals(hashes, hashes(folder)));
+    SwingUtilities.invokeAndWait(() -> frame[0].dispose());
+
+    boolean allPassed = true;
+    for (String result : RESULTS) {
+      System.out.println(result);
+      if (result.startsWith("FAIL")) allPassed = false;
+    }
+    System.out.println(allPassed ? "ALL CHECKS PASSED" : "SOME CHECKS FAILED");
+    System.out.println("screenshots: " + folder.toAbsolutePath());
+    if (!allPassed) System.exit(1);
+  }
+
+  private static Node child(Node parent, String name) {
+    for (Node node : parent.children) if (name.equals(node.name)) return node;
+    throw new IllegalStateException("No child named " + name);
+  }
+
+  private static void check(String what, boolean passed) {
+    RESULTS.add((passed ? "ok   " : "FAIL ") + what);
+  }
+
+  private static void pause() throws Exception {
+    SwingUtilities.invokeAndWait(() -> {});
+    Thread.sleep(350);
+    SwingUtilities.invokeAndWait(() -> {});
+  }
+
+  private static void shot(PosterFrame frame, Path destination) throws Exception {
+    Rectangle bounds = frame.getBounds();
+    BufferedImage image = new java.awt.Robot().createScreenCapture(bounds);
+    ImageIO.write(image, "png", destination.toFile());
+  }
+
+  private static String[] hashes(Path folder) throws Exception {
+    String[] result = new String[PanelFixtures.NAMES.length];
+    for (int i = 0; i < result.length; i++) {
+      byte[] bytes = Files.readAllBytes(folder.resolve(PanelFixtures.NAMES[i] + ".tif"));
+      StringBuilder hex = new StringBuilder();
+      for (byte value : MessageDigest.getInstance("SHA-256").digest(bytes))
+        hex.append(String.format("%02x", value));
+      result[i] = hex.toString();
+    }
+    return result;
+  }
+}
