@@ -124,3 +124,97 @@
 - `dist/figure_panel_builder_testset.zip` に設定 JSON と TIFF 3 枚を同じ階層で格納。README の主手順を ZIP のダウンロード・展開・設定読込に変更。`package-testset.ps1` で現在のサンプルから再作成可能。
 - ZIP 内の4ファイルが元ファイルと SHA-256 一致、JSON の全参照先が ZIP 内に存在することを確認。
 - 増分 `build.ps1` verify 成功: 46 tests, 0 failures, 0 errors, 0 skipped。製品コード・配布 JAR は変更なし。既存 Fiji プロセス・開画像の操作なし。
+
+## 2026-09-10: Poster / Layout 基盤（S1-S3, S8）
+
+新パッケージ `org.microscopy.panel` を追加。既存 `org.microscopy.figure` は無改変で、既存 46 テストは全通過を維持（合計 92 tests, 0 failures, 0 errors）。
+
+### 実装した範囲
+
+| 段階 | 内容 |
+|---|---|
+| S1 | Document / Page / Node / Content モデル、Gson 往復、schemaVersion、`LegacyImporter`（v1 settings JSON → Document） |
+| S2 | `LayoutEngine` + `LayoutResult`、SizeExpr（Auto / Fixed / fr / % / SameAs / AspectRatio / Min-Max）、順序解決 |
+| S3 | `RenderTarget`（dpi）、`NodeRenderer`、`TextRenderer`（LineBreakMeasurer）、`DocumentRasterizer`（バンド分割）、`PngStreamWriter`、`ResolutionReport` |
+| S8 | `PptxProjectWriter` / `PptxProjectReader`（path 参照 + プレビュー品質サムネイル + project part） |
+
+### 自動検証（`mvn verify`）
+
+| 確認内容 | 結果 |
+|---|---|
+| 単位変換 | 1 mm = 36000 EMU 厳密。A0 = 30276000 x 42804000 EMU。長辺正規化は廃止 |
+| レイアウト | トラック合計＝内寸、fr 配分、clamp 時の凍結と再配分、span のギャップ込み幅、AspectRatio 保持、SameAs の順序非依存 |
+| SameAs 循環 | `Document.validate()` が保存前に拒否（レイアウト時ではなく作成時） |
+| v1 取り込み | 3x3 図が 9 セル + 行/列ラベル 3+3 ノードに分解。ラベル帯の左右上下、Merge ラベルのチャネル別色、scale bar scope のセル単位解決 |
+| **旧エンジンとのピクセル一致** | 取り込んだ 9 セルすべてが `PanelLayoutEngine.render` の該当領域と完全一致（許容差 0） |
+| mm 丸めの整合 | dpi = 25.4/mmPerPx で 820x628 px、各セルの px 位置・サイズが旧計算式と一致 |
+| バンド分割の不変性 | バンド 7 行と 256 行で出力が完全一致（継ぎ目なし） |
+| ストリーミング PNG | 書き出し → ImageIO 読み戻しが完全一致 |
+| OOXML | 全 xml / rels パートが well-formed。`p:sldSz` が mm x 36000 と一致。各 shape に nodeId |
+| project part | JSON 往復が完全一致。Save → reopen → Save が不動点 |
+| media が派生物であること | 全 media を破壊した PPTX でも project part から再 open し、ソースから再描画 |
+| media 再利用 | 無変更での 2 回目の保存は 0 レンダリング・全件再利用。サイズ不一致/非 PNG は再利用せず再描画 |
+| 複数ページ | 2 ページ → slide1/slide2、Content_Types・presentation rels・sldIdLst を整合 |
+| project part なしの PPTX | 例外ではなく「読み取り専用インポート＋再保存で編集可能」の案内を返す |
+
+### 実測（`PosterRenderValidation`, A0 縦・6 パネル、JDK 21 / -Xmx1g）
+
+```
+page   : 841 x 1189 mm
+raster : 9933 x 14043 px = 139.5 megapixels
+wrote  : a0-poster.png (12.7 MB) in 3.7 s      ← Export 相当
+heap   : 490 MB used of 1074 MB max            ← 全体ラスタなら 558 MB を単一配列で要求
+save   : a0-poster.pptx (2.6 MB) in 1.46 s, 6 media rendered   ← Save（プレビュー 150 dpi）
+resave : 0.14 s, 0 rendered / 6 reused
+```
+
+139.5 MP は既存の 100 MP 上限では拒否される規模。Document level の上限を撤廃しバンド分割にしたことで、A0 300 dpi が 1 GB ヒープで通る。Save と Export の分離により、保存は再保存 0.14 秒。
+
+出力は `artifacts/`（Git 管理外）: `a0-poster.png`、`a0-poster-preview.png`、`a0-poster.pptx`。
+
+### 未実施・残課題
+
+- **PowerPoint 実機での開封確認が未実施**（Windows PowerPoint での表示・テキスト編集・再 open）。`artifacts/a0-poster.pptx` で要確認。
+- S4 Canvas/Inspector UI、S5 Asset DB と Bio-Formats、S6 テキスト flow region と overflow、S7 Token/Style 解決、S9 PowerPoint 差分取り込み、S10 PDF/TIFF/印刷、S11 仕上げは未着手。
+- `TextRenderer` は矩形領域のみ。非矩形 flow region は S6。
+- `NodeRenderer` / `PptxShapeBuilder` は appearance のリテラル値のみ解決（Token 参照は S7 で結線）。
+- TIFF 出力はストリーミング未対応（S10 で ImageJ TiffEncoder 経路）。
+
+## 2026-09-10 (2): Poster / Layout の入口と Canvas / Inspector（S4 前半）
+
+`Plugins > Poster / Layout Builder` を追加。既存 `Plugins > Figure Panel Builder` はメニューパスも実装も無変更（同名の leaf とサブメニューの衝突を避けるため兄弟項目にした）。合計 94 tests, 0 failures, 0 errors。
+
+### 追加した要素
+
+`PosterCommand` / `PosterFrame` / `PosterCanvas` / `Inspector` / `AssetLibrary`。
+
+`AssetLibrary` は S5 の先取りで、assetId → 画素の解決を一箇所に集約する。ファイル由来は初回描画時に遅延読み込み、Fiji で開いている画像は従来通り即時スナップショットを登録。欠損時は `missing()` を返し、UI が再リンクを促す。既存 `org.microscopy.figure` には手を入れていない。
+
+### GUI 検証（`PosterUiValidation`、既存 Fiji とは別プロセス）
+
+| 確認内容 | 結果 |
+|---|---|
+| A1 ポスター（3x2 パネル + タイトル + キャプション）の表示 | ok |
+| ステータスバー | `594 x 841 mm | 6 of 6 pictures are below 300 dpi (6 below 150 dpi).` |
+| パネル選択 | 選択枠と親の薄い輪郭を描画、パンくずが `Poster ▸ Panels ▸ Image A Green` |
+| Esc / Enter / Tab | 親へ / 子へ / 次の兄弟へ移動 |
+| 列を 1fr → 2fr | 279.0 mm → 372.0 mm（x1.333 = (2/3)/(1/2)、期待値と一致） |
+| Save project | PPTX 1 スライド、プレビュー品質でサイズ小 |
+| Export PNG 300 dpi | 書き出し成功 |
+| 自身が保存した PPTX の再 open | 6 パネルを復元 |
+| 元 TIFF の保護 | 操作前後の SHA-256 一致 |
+
+スクリーンショット: `artifacts/poster-ui/`（Git 管理外）。
+
+### 検証で見つけて直した不具合
+
+1. **アスペクト固定の子が引き伸ばされた行の上端に寄る** → STRETCH でセルを埋めきれない子は中央寄せに変更。ぴったり収まる場合は無変化なので、旧エンジンとのピクセル一致テストは影響を受けない。
+2. **行の Auto 計測が解決後の列幅を見ていない** → 列 2fr にするとアスペクト由来の高さが行高を超え、3 件のクリップ警告と画像切れが発生していた。CSS grid と同じく列を先に解決し、その幅で行を計測するよう修正（`SizeExpr.FRACTION` は与えられた領域を埋める、という定義も明示）。
+3. **トラック合計が親を超えても無警告** → 「rows need 160 mm but only 100 mm is available」のように報告するよう追加。固定ページ + 2fr 列 + アスペクト固定は容易に過剰制約になるため、黙って歪めず言う方針を維持。
+
+いずれも回帰テストを追加済み（`LayoutEngineTest`）。
+
+### 未実施
+
+- **Fiji 実機での確認が未実施。** `C:\Program Files\Fiji\plugins` は BUILTIN\Users が読み取り専用のため、管理者権限での jar コピーが必要。コピー後に Fiji MCP で `Plugins > Poster / Layout Builder` の起動確認を行う。
+- キャンバス上のドラッグ編集（分割・結合・トラック境界ドラッグ）は未実装。現時点の編集は Inspector の数値入力のみ。

@@ -224,3 +224,26 @@ Copy-Item -LiteralPath target/figure-panel-builder-1.0.0.jar -Destination dist/f
 
 ## Free build mode
 上部メニューバーの右から `Free mode` が選択できます。Free modeは現在未完成です。
+## Poster / Layout Builder（開発中）
+
+`Plugins > Poster / Layout Builder` から起動します。従来の `Plugins > Figure Panel Builder` は変更ありません。
+
+Figure を構成要素として、Panel / Poster / Slide まで同じ **Node** の入れ子で扱うレイアウトエディタです。座標は mm で、出力時に 1 mm = 36000 EMU へ厳密変換します。設計方針は [plan.md](plan.md) を参照してください。
+
+### 現在できること
+
+| 操作 | 説明 |
+|---|---|
+| `Import figure settings...` | 既存の Figure 設定 JSON を読み込み、9 セルの図を「セル 1 つ = 1 ノード」に分解して取り込みます。行・列ラベルは独立したテキストノードになります |
+| `Open project PPTX...` | 本ツールが保存した PPTX をプロジェクトとして再開します。元画像が見つからない場合は再リンクを促します |
+| `Save project` / `Save as...` | PPTX を**プロジェクト正本**として保存します。画像はプレビュー品質（既定 150 dpi）のサムネイル、テキスト・枠・スケールバーはベクタです |
+| `Export PNG...` | 目標 dpi を指定してフル解像度で書き出します。A0 300 dpi（約 140 メガピクセル）も帯分割で処理します |
+| キャンバス | クリックで選択。上部のパンくずで階層を移動。`Esc` で親、`Enter` で子、`Tab` で兄弟 |
+| Inspector | 選択対象が何であっても Layout / Appearance / Typography / Content の 4 節。Width / Height は Auto・Fill・Fixed・Percent・Same as・Aspect から選択し、`Advanced` で min / max を出します |
+| ステータスバー | ページ寸法、各画像の実効 dpi の警告、レイアウト警告（セルに収まらない・ページに収まらない）を表示します |
+
+> **注意**：`Save project` の PPTX は画像がプレビュー品質です。印刷・投稿用は必ず `Export` を使ってください。picture の図形名にも `preview 150 dpi` と入ります。
+
+### 未実装
+
+Token / Style システム、非矩形テキスト領域、Bio-Formats 経由の Z/T・多 series、PowerPoint 側編集の取り込み、PDF / TIFF / 印刷、キャンバス上でのドラッグ編集（現時点では Inspector から数値で編集します）。
