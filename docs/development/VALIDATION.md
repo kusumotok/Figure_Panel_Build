@@ -265,3 +265,17 @@ exported 300 dpi PNG in 0.3 s (5.9 MB)
 - 取り込みダイアログの実機操作確認（jar 再インストールが必要）
 - multi-channel / multi-Z / multi-T を含む lif での検証（手元のファイルは全 series が C=1 Z=1 T=1）
 - Portable（選択 series の OME-TIFF 埋め込み）
+
+## 2026-09-10 (4): B&C ドック（既存 ContrastPanel の再利用）
+
+103 tests, 0 failures, 0 errors。
+
+ScientificImage ノードを選択したときだけ下部に既存 `ContrastPanel` を出すようにした。チャネル選択・LUT・Grayscale・Invert gray・Min/Max・Auto/Reset・4 本のスライダー・ヒストグラムがそのまま使える。`setIndividual()`（Free build 用に既にあったもの）を呼んで「shared across all conditions」の文言を「selected panel only」に切り替えている。Poster では各ノードが独立した `FigureConfiguration` を持つため。
+
+`org.microscopy.figure` への変更は `InputImageManager.adopt(String id, Source)` の**追加のみ**。既存コードからは呼ばれず、既存 46 テストは全通過。Document がアセット ID で画素を参照するのに対し、`ContrastPanel` は `inputs.get(sourceId)` で引くため、その橋渡しに必要だった。
+
+スライダー操作中にパネルが作り直されないよう、選択ノードが変わったときだけ再構築する。
+
+### GUI 検証で直したもの
+
+**スクリーンショットが前面の別ウィンドウを写し込んでいた。** `Robot.createScreenCapture` は画面の矩形を撮るため、Poster ウィンドウの手前にあったものが混入した（実際にユーザーのブラウザ画面が入り、当該ファイルは削除済み）。`frame.paint(Graphics)` でウィンドウ自体を描画する方式に変更。前面状態に依存せず、無関係な画面内容も入らない。

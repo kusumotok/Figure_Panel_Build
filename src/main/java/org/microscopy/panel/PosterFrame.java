@@ -36,6 +36,9 @@ public class PosterFrame extends JFrame {
   private LayoutResult layout;
   private String selectedId;
   private File projectFile;
+  private final JPanel contrastDock = new JPanel(new java.awt.FlowLayout(java.awt.FlowLayout.CENTER, 0, 4));
+  private org.microscopy.figure.ContrastPanel contrast;
+  private String contrastNodeId;
 
   public PosterFrame() {
     super("Poster / Layout");
@@ -74,7 +77,11 @@ public class PosterFrame extends JFrame {
     add(top, BorderLayout.NORTH);
     add(scroll, BorderLayout.CENTER);
     add(new JScrollPane(inspector), BorderLayout.EAST);
-    add(status, BorderLayout.SOUTH);
+    contrastDock.setVisible(false);
+    JPanel bottom = new JPanel(new BorderLayout());
+    bottom.add(contrastDock, BorderLayout.CENTER);
+    bottom.add(status, BorderLayout.SOUTH);
+    add(bottom, BorderLayout.SOUTH);
     installKeys();
 
     Rectangle screen = getGraphicsConfiguration().getBounds();
@@ -260,6 +267,40 @@ public class PosterFrame extends JFrame {
     Node node = nodeId == null ? null : document.page(0).rootNode.find(nodeId);
     inspector.show(document, document.page(0), node);
     updateBreadcrumb();
+    showContrastFor(node);
+  }
+
+  /**
+   * The figure mode's contrast panel, reused as-is. It edits the same ChannelConfig objects the
+   * renderer reads, so B and C, LUT and inversion all work without a second implementation.
+   */
+  private void showContrastFor(Node node) {
+    boolean image = node != null && node.content.kind == Content.Kind.SCIENTIFIC_IMAGE;
+    String wanted = image ? node.id : null;
+    // Rebuilding while a slider is being dragged would pull it out from under the pointer, so
+    // the panel is only replaced when the selection actually moves.
+    if (java.util.Objects.equals(wanted, contrastNodeId)) return;
+    contrastNodeId = wanted;
+    if (contrast != null) contrast.stop();
+    contrastDock.removeAll();
+    contrast = null;
+    contrastDock.setVisible(image);
+    if (image) {
+      ScientificImageContent content = node.content.scientificImage;
+      try {
+        contrast = new org.microscopy.figure.ContrastPanel(content.figureConfig,
+            library.managerFor(content.assetId, content.z, content.t),
+            () -> relayout(true), true);
+        // Each node carries its own configuration here, so the wording that says the settings
+        // are shared across conditions would be wrong.
+        contrast.setIndividual();
+        contrastDock.add(contrast);
+      } catch (RuntimeException ex) {
+        contrastDock.add(new JLabel("Cannot show B&C: " + ex.getMessage()));
+      }
+    }
+    contrastDock.revalidate();
+    contrastDock.repaint();
   }
 
   private void selectParent() {
@@ -457,4 +498,7 @@ public class PosterFrame extends JFrame {
     document.validate();
     selectedId = target.id;
   }
+
+  /** True when the B and C dock is showing controls for the selection. */
+  public boolean contrastShown() { return contrast != null && contrastDock.isVisible(); }
 }

@@ -1,6 +1,5 @@
 package org.microscopy.panel;
 
-import java.awt.Rectangle;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.nio.file.Files;
@@ -107,6 +106,15 @@ public final class PosterUiValidation {
     check("Reopened the project from its own PPTX", frame[0].document() != null
         && child(frame[0].document().page(0).rootNode, "Panels").children.size() == 6);
 
+    // The figure mode contrast panel, reused for the selected image.
+    SwingUtilities.invokeAndWait(() -> frame[0].selectNode(firstPanel.id));
+    pause();
+    check("B and C dock appears for an image", frame[0].contrastShown());
+    shot(frame[0], folder.resolve("06-contrast.png"));
+    SwingUtilities.invokeAndWait(() -> frame[0].selectNode(panels.id));
+    pause();
+    check("B and C dock hides for a container", !frame[0].contrastShown());
+
     check("Source TIFFs unchanged", java.util.Arrays.equals(hashes, hashes(folder)));
     SwingUtilities.invokeAndWait(() -> frame[0].dispose());
 
@@ -135,9 +143,22 @@ public final class PosterUiValidation {
     SwingUtilities.invokeAndWait(() -> {});
   }
 
-  private static void shot(PosterFrame frame, Path destination) throws Exception {
-    Rectangle bounds = frame.getBounds();
-    BufferedImage image = new java.awt.Robot().createScreenCapture(bounds);
+  /**
+   * Paints the window into an image rather than grabbing the screen. A screen grab would also
+   * capture whatever else happens to be in front of it, which is both unreliable and none of
+   * this check's business.
+   */
+  private static void shot(final PosterFrame frame, Path destination) throws Exception {
+    final BufferedImage image = new BufferedImage(Math.max(1, frame.getWidth()),
+        Math.max(1, frame.getHeight()), BufferedImage.TYPE_INT_RGB);
+    SwingUtilities.invokeAndWait(() -> {
+      java.awt.Graphics2D g = image.createGraphics();
+      try {
+        frame.paint(g);
+      } finally {
+        g.dispose();
+      }
+    });
     ImageIO.write(image, "png", destination.toFile());
   }
 

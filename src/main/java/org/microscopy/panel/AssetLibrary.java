@@ -224,4 +224,14 @@ public final class AssetLibrary implements SourceProvider {
     if (asset.originalUri != null) return new File(asset.originalUri).getName();
     return asset.id;
   }
+
+  /**
+   * A manager holding just this asset, indexed by its asset id. The figure mode's contrast panel
+   * looks sources up that way, so this is what lets it be reused unchanged.
+   */
+  public InputImageManager managerFor(String assetId, int z, int t) {
+    InputImageManager manager = new InputImageManager();
+    manager.adopt(assetId, source(assetId, z, t));
+    return manager;
+  }
 }

@@ -57,6 +57,17 @@ public class InputImageManager {
   /** Merge immutable snapshots, preserving older sources required by undo history. */
   public void include(InputImageManager other) { sources.putAll(other.sources); }
 
+  /**
+   * Index an existing snapshot under a caller-chosen id. Additive: nothing in the figure mode
+   * uses it. The layout editor needs it because its documents address pixels by asset id, and
+   * the panels here look sources up through this map.
+   */
+  public void adopt(String id, Source source) {
+    if (id == null || id.trim().isEmpty()) throw new IllegalArgumentException("Missing source id.");
+    if (source == null) throw new IllegalArgumentException("Missing source.");
+    sources.put(id, source);
+  }
+
   public Source load(File file) {
     if (!file.getName().toLowerCase(Locale.ROOT).matches(".*\\.tiff?"))
       throw new IllegalArgumentException("Select a TIF/TIFF file.");
