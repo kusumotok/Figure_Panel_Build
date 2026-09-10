@@ -182,6 +182,25 @@ public final class PosterUiValidation {
             styled.page(0).rootNode.children.get(0).id, Prop.FONT_SIZE_PT)));
     shot(frame[0], folder.resolve("08-styles.png"));
 
+    // Undo has to bring back a deleted panel; deleting was unrecoverable before.
+    final int panelsBefore = child(frame[0].document().page(0).rootNode, "Panels").children.size();
+    SwingUtilities.invokeAndWait(() -> {
+      frame[0].selectNode(child(frame[0].document().page(0).rootNode, "Panels")
+          .children.get(0).id);
+      frame[0].deleteSelected();
+    });
+    pause();
+    check("Delete removed one more panel",
+        child(frame[0].document().page(0).rootNode, "Panels").children.size() == panelsBefore - 1);
+    SwingUtilities.invokeAndWait(() -> frame[0].undo());
+    pause();
+    check("Undo brings the panel back",
+        child(frame[0].document().page(0).rootNode, "Panels").children.size() == panelsBefore);
+    SwingUtilities.invokeAndWait(() -> frame[0].redo());
+    pause();
+    check("Redo removes it again",
+        child(frame[0].document().page(0).rootNode, "Panels").children.size() == panelsBefore - 1);
+
     check("Source TIFFs unchanged", java.util.Arrays.equals(hashes, hashes(folder)));
     SwingUtilities.invokeAndWait(() -> frame[0].dispose());
 

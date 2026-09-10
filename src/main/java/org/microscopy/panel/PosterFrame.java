@@ -41,6 +41,8 @@ public class PosterFrame extends JFrame {
   private String contrastNodeId;
   private java.util.Set<String> overflowing = new java.util.LinkedHashSet<String>();
   private final StyleManagerPanel stylePanel;
+  private final DocumentHistory history = new DocumentHistory();
+  private boolean restoring;
 
   public PosterFrame() {
     super("Poster / Layout");
@@ -50,19 +52,19 @@ public class PosterFrame extends JFrame {
 
       public void enterChild(String nodeId) { select(nodeId); }
 
-      public void documentChanged() { attempt(() -> relayout(true)); }
+      public void documentChanged() { attempt(() -> { relayout(true); recordHistory("canvas"); }); }
 
       public void contextMenu(String nodeId, int x, int y) { showMenu(nodeId, x, y); }
 
       public void overflowChanged(java.util.Set<String> nodeIds) { reportOverflow(nodeIds); }
     });
     inspector = new Inspector(new Inspector.Listener() {
-      public void documentChanged() { relayout(true); }
+      public void documentChanged() { relayout(true); recordHistory("inspector"); }
     });
     stylePanel = new StyleManagerPanel(new StyleManagerPanel.Listener() {
       public String selectedNodeId() { return selectedId; }
 
-      public void documentChanged() { attempt(() -> relayout(true)); }
+      public void documentChanged() { attempt(() -> { relayout(true); recordHistory("style"); }); }
     });
     installStyleDrops();
 
@@ -141,6 +143,16 @@ public class PosterFrame extends JFrame {
       public void actionPerformed(java.awt.event.ActionEvent event) { selectNextSibling(); }
     });
     root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
+        .put(KeyStroke.getKeyStroke("control Z"), "undo");
+    root.getActionMap().put("undo", new javax.swing.AbstractAction() {
+      public void actionPerformed(java.awt.event.ActionEvent event) { attempt(() -> undo()); }
+    });
+    root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
+        .put(KeyStroke.getKeyStroke("control Y"), "redo");
+    root.getActionMap().put("redo", new javax.swing.AbstractAction() {
+      public void actionPerformed(java.awt.event.ActionEvent event) { attempt(() -> redo()); }
+    });
+    root.getInputMap(JComponent.WHEN_IN_FOCUSED_WINDOW)
         .put(KeyStroke.getKeyStroke("DELETE"), "deleteNode");
     root.getActionMap().put("deleteNode", new javax.swing.AbstractAction() {
       public void actionPerformed(java.awt.event.ActionEvent event) {
@@ -166,6 +178,8 @@ public class PosterFrame extends JFrame {
     projectFile = null;
     selectedId = document.page(0).rootNode.id;
     relayout(true);
+    history.clear();
+    recordHistory(null);
     status.setText(String.format(
         "Imported %s at %.0f mm wide (%.0f dpi). Set the page size or switch tracks to Fill to"
             + " rearrange it.",
@@ -457,6 +471,8 @@ public class PosterFrame extends JFrame {
     library.use(document);
     selectedId = document.page(0).rootNode.id;
     relayout(true);
+    history.clear();
+    recordHistory(null);
     status.setText(opened.message);
   }
 
@@ -485,6 +501,7 @@ public class PosterFrame extends JFrame {
       List<Asset> placeable = new ContainerImport().apply(document, plan);
       place(placeable);
       status.setText("Added " + placeable.size() + " image(s) from " + file.getName() + ".");
+      recordHistory("import");
     } finally {
       setCursor(java.awt.Cursor.getDefaultCursor());
     }
@@ -592,6 +609,7 @@ public class PosterFrame extends JFrame {
       action.run();
       document.validate();
       relayout(true);
+      recordHistory("structure");
     }));
     menu.add(entry);
   }
@@ -606,6 +624,7 @@ public class PosterFrame extends JFrame {
     DocumentEdits.remove(page(), selectedId);
     selectedId = parent.id;
     relayout(true);
+    recordHistory("delete");
     status.setText("Removed the panel. The source images are untouched.");
   }
 
@@ -692,5 +711,54 @@ public class PosterFrame extends JFrame {
     } catch (java.io.IOException ex) {
       status.setText("Could not import the PowerPoint edits: " + ex.getMessage());
     }
+  }
+
+  // --------------------------------------------------------------- history
+
+  /**
+   * Snapshots are taken here rather than at each editing site. Every change ends in a re-layout,
+   * and the serialiser tells us whether anything actually differs, so no edit path can forget.
+   */
+  private void recordHistory(String group) {
+    if (restoring || document == null) return;
+    history.record(document, group);
+  }
+
+  public void undo() {
+    Document previous = history.undo();
+    if (previous == null) {
+      status.setText("Nothing left to undo.");
+      return;
+    }
+    restore(previous, "Undid the last change.");
+  }
+
+  public void redo() {
+    Document next = history.redo();
+    if (next == null) {
+      status.setText("Nothing to redo.");
+      return;
+    }
+    restore(next, "Redid the change.");
+  }
+
+  private void restore(Document restored, String message) {
+    restoring = true;
+    try {
+      document = restored;
+      library.use(document);
+      if (selectedId == null || page().rootNode.find(selectedId) == null)
+        selectedId = page().rootNode.id;
+      relayout(true);
+    } finally {
+      restoring = false;
+    }
+    status.setText(message);
+  }
+
+  public boolean canUndo() { return history.canUndo(); }
+
+  public String historyState() {
+    return history.size() + " states, undo=" + history.canUndo() + ", redo=" + history.canRedo();
   }
 }
