@@ -6,13 +6,14 @@ package org.microscopy.panel;
  * polymorphic type adapter.
  */
 public final class Content {
-  public enum Kind { NONE, TEXT, SCIENTIFIC_IMAGE, IMAGE, SHAPE }
+  public enum Kind { NONE, TEXT, SCIENTIFIC_IMAGE, IMAGE, SHAPE, PROJECT }
 
   public Kind kind = Kind.NONE;
   public TextContent text;
   public ScientificImageContent scientificImage;
   public ImageContent image;
   public ShapeContent shape;
+  public ProjectContent project;
 
   public static Content none() { return new Content(); }
 
@@ -34,6 +35,12 @@ public final class Content {
     return content;
   }
 
+  public static Content of(ProjectContent project) {
+    Content content = new Content();
+    content.kind = Kind.PROJECT; content.project = project;
+    return content;
+  }
+
   public static Content of(ShapeContent shape) {
     Content content = new Content();
     content.kind = Kind.SHAPE; content.shape = shape;
@@ -43,7 +50,7 @@ public final class Content {
   public void validate(String where) {
     if (kind == null) throw new IllegalArgumentException(where + ": missing content kind.");
     int present = (text != null ? 1 : 0) + (scientificImage != null ? 1 : 0)
-        + (image != null ? 1 : 0) + (shape != null ? 1 : 0);
+        + (image != null ? 1 : 0) + (shape != null ? 1 : 0) + (project != null ? 1 : 0);
     if (kind == Kind.NONE) {
       if (present != 0) throw new IllegalArgumentException(where + ": empty content carries a payload.");
       return;
@@ -61,6 +68,11 @@ public final class Content {
       case IMAGE:
         if (image == null) throw new IllegalArgumentException(where + ": picture payload missing.");
         image.validate(where);
+        break;
+      case PROJECT:
+        if (project == null)
+          throw new IllegalArgumentException(where + ": attached project payload missing.");
+        project.validate(where);
         break;
       default:
         if (shape == null) throw new IllegalArgumentException(where + ": shape payload missing.");

@@ -6,12 +6,16 @@ package org.microscopy.panel;
  */
 public class DefaultContentMeasurer implements ContentMeasurer {
   private final double nominalDpi;
+  private final LinkedProjects attachments;
 
-  public DefaultContentMeasurer() { this(NOMINAL_DPI); }
+  public DefaultContentMeasurer() { this(NOMINAL_DPI, new LinkedProjects()); }
 
-  public DefaultContentMeasurer(double nominalDpi) {
+  public DefaultContentMeasurer(double nominalDpi) { this(nominalDpi, new LinkedProjects()); }
+
+  public DefaultContentMeasurer(double nominalDpi, LinkedProjects attachments) {
     Units.checkDpi(nominalDpi);
     this.nominalDpi = nominalDpi;
+    this.attachments = attachments;
   }
 
   @Override
@@ -23,6 +27,8 @@ public class DefaultContentMeasurer implements ContentMeasurer {
         return pixels(document.asset(node.content.image.assetId));
       case TEXT:
         return text(node.content.text, availableWidthMm);
+      case PROJECT:
+        return attached(node.content.project);
       default:
         return SizeMm.ZERO;
     }
@@ -51,5 +57,16 @@ public class DefaultContentMeasurer implements ContentMeasurer {
     double width = availableWidthMm > 0 ? Math.min(widest, availableWidthMm) : widest;
     boolean sideways = content.rotation != TextContent.Rotation.NONE;
     return sideways ? new SizeMm(lines, width) : new SizeMm(width, lines);
+  }
+
+  /**
+   * An attached project is as big as the page it holds, which is what gives the cell its shape.
+   * One that cannot be read gets a small placeholder rather than collapsing to nothing, so the
+   * gap is visible and can be clicked.
+   */
+  private SizeMm attached(ProjectContent content) {
+    LinkedProjects.Attached open = attachments.open(content);
+    if (open == null) return new SizeMm(40, 30);
+    return new SizeMm(open.box.width, open.box.height);
   }
 }

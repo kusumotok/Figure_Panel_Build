@@ -22,9 +22,15 @@ public final class DocumentRasterizer {
   }
 
   private final SourceProvider sources;
+  private final LinkedProjects attachments;
   private java.util.Set<String> overflowed = new java.util.LinkedHashSet<String>();
 
-  public DocumentRasterizer(SourceProvider sources) { this.sources = sources; }
+  public DocumentRasterizer(SourceProvider sources) { this(sources, new LinkedProjects()); }
+
+  public DocumentRasterizer(SourceProvider sources, LinkedProjects attachments) {
+    this.sources = sources;
+    this.attachments = attachments;
+  }
 
   /** Text nodes that did not fit during the last rasterisation. */
   public java.util.Set<String> overflowedNodes() { return overflowed; }
@@ -38,7 +44,7 @@ public final class DocumentRasterizer {
       int bandRows, BandSink sink) throws IOException {
     if (bandRows < 1) throw new IllegalArgumentException("Band height must be at least one row.");
     int[] size = sizePx(layout, target);
-    NodeRenderer renderer = new NodeRenderer(sources);
+    NodeRenderer renderer = new NodeRenderer(sources, attachments);
     double mmPerPx = Units.MM_PER_INCH / target.dpi;
     for (int top = 0; top < size[1]; top += bandRows) {
       int rows = Math.min(bandRows, size[1] - top);

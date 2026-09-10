@@ -42,6 +42,7 @@ public class PosterFrame extends JFrame {
   private java.util.Set<String> overflowing = new java.util.LinkedHashSet<String>();
   private final StyleManagerPanel stylePanel;
   private final DocumentHistory history = new DocumentHistory();
+  private final LinkedProjects attachments = new LinkedProjects();
   private boolean restoring;
 
   public PosterFrame() {
@@ -70,6 +71,7 @@ public class PosterFrame extends JFrame {
 
     JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
     button(toolbar, "Add images...", "addImages", () -> addImagesFromContainer());
+    button(toolbar, "Attach project...", "attachProject", () -> attachProject());
     button(toolbar, "Import figure settings...", "importSettings", () -> importSettings());
     button(toolbar, "Open project PPTX...", "openProject", () -> openProject());
     button(toolbar, "Save project", "saveProject", () -> saveProject(false));
@@ -244,7 +246,7 @@ public class PosterFrame extends JFrame {
     if (file == null) return;
     PptxProjectWriter.Saved saved;
     try {
-      saved = new PptxProjectWriter().save(file, document, sources, new PptxProjectWriter.Options());
+      saved = new PptxProjectWriter(attachments).save(file, document, sources, new PptxProjectWriter.Options());
     } catch (java.io.IOException ex) {
       throw new IllegalArgumentException("Cannot write " + file.getName() + ": " + ex.getMessage(), ex);
     }
@@ -266,7 +268,7 @@ public class PosterFrame extends JFrame {
         tiff ? "TIFF image (*.tif)" : "PNG image (*.png)", true);
     if (file == null) return;
     RenderTarget target = dialog.target();
-    DocumentRasterizer rasterizer = new DocumentRasterizer(sources);
+    DocumentRasterizer rasterizer = new DocumentRasterizer(sources, attachments);
     try {
       if (tiff)
         rasterizer.writeTiff(file, document, page, layout, target,
@@ -392,7 +394,9 @@ public class PosterFrame extends JFrame {
   private void relayout(boolean keepSelection) {
     if (document == null) return;
     Page page = document.page(0);
-    layout = new LayoutEngine().layout(document, page);
+    attachments.clear();
+    layout = new LayoutEngine(
+        new DefaultContentMeasurer(ContentMeasurer.NOMINAL_DPI, attachments)).layout(document, page);
     canvas.show(document, page, layout);
     stylePanel.show(document);
     if (!keepSelection || selectedId == null || !layout.has(selectedId))
@@ -443,7 +447,7 @@ public class PosterFrame extends JFrame {
   public PptxProjectWriter.Saved saveProjectTo(File file) throws java.io.IOException {
     require();
     PptxProjectWriter.Saved saved =
-        new PptxProjectWriter().save(file, document, sources, new PptxProjectWriter.Options());
+        new PptxProjectWriter(attachments).save(file, document, sources, new PptxProjectWriter.Options());
     projectFile = file;
     status.setText(String.format("Saved %s as a project (%.1f MB, pictures at preview quality).",
         file.getName(), saved.bytes / 1e6));
@@ -452,7 +456,7 @@ public class PosterFrame extends JFrame {
 
   public void exportTiffTo(File file, double dpi) throws java.io.IOException {
     require();
-    new DocumentRasterizer(sources).writeTiff(file, document, document.page(0), layout,
+    new DocumentRasterizer(sources, attachments).writeTiff(file, document, document.page(0), layout,
         new RenderTarget(dpi, RenderTarget.Background.WHITE),
         DocumentRasterizer.TIFF_PIXEL_LIMIT);
   }
@@ -460,7 +464,7 @@ public class PosterFrame extends JFrame {
   public void exportPngTo(File file, double dpi) throws java.io.IOException {
     require();
     RenderTarget target = new RenderTarget(dpi, RenderTarget.Background.WHITE);
-    new DocumentRasterizer(sources).writePng(file, document, document.page(0), layout, target);
+    new DocumentRasterizer(sources, attachments).writePng(file, document, document.page(0), layout, target);
   }
 
   public void openProjectFile(File file) throws java.io.IOException {
@@ -596,6 +600,10 @@ public class PosterFrame extends JFrame {
     menu.addSeparator();
     item(menu, "Bring forward", !isRoot, () -> DocumentEdits.bringForward(page(), nodeId));
     item(menu, "Send backward", !isRoot, () -> DocumentEdits.sendBackward(page(), nodeId));
+    if (node.content.kind == Content.Kind.PROJECT) {
+      menu.addSeparator();
+      item(menu, "Embed this figure (cut the link)", true, () -> embedSelected());
+    }
     menu.addSeparator();
     item(menu, "Delete", !isRoot, () -> deleteSelected());
     menu.show(canvas, x, y);
@@ -760,5 +768,66 @@ public class PosterFrame extends JFrame {
 
   public String historyState() {
     return history.size() + " states, undo=" + history.canUndo() + ", redo=" + history.canRedo();
+  }
+
+  // ------------------------------------------------------- attached projects
+
+  /**
+   * Places a saved project inside the selected cell. The link is kept, so correcting the figure
+   * and reopening the poster shows the correction; Embed later copies it in and cuts the link.
+   */
+  public void attachProject() {
+    if (document == null) startEmptyDocument();
+    File file = choose("Attach a project", "pptx", "Project PowerPoint (*.pptx)", false);
+    if (file == null) return;
+    if (projectFile != null && sameFile(file, projectFile))
+      throw new IllegalArgumentException("A project cannot be attached to itself.");
+    ProjectContent content = new ProjectContent(file.getAbsolutePath(),
+        file.getName().replaceAll("[.]pptx$", ""));
+    LinkedProjects.Attached open = attachments.open(content);
+    if (open == null) throw new IllegalArgumentException(attachments.failure(content));
+
+    Node target = page().rootNode.find(selectedId);
+    Node parent = target == null ? null : page().rootNode.parentOf(target.id);
+    Node node = Node.leaf(content.title, Content.of(content));
+    node.size.width = SizeExpr.fill();
+    // The figure keeps its shape wherever it is placed; only its size changes.
+    node.size.height = SizeExpr.aspectRatio(open.box.height / open.box.width);
+    if (parent != null && target.content.kind == Content.Kind.NONE && target.children.isEmpty()) {
+      node.placement = target.placement;
+      parent.children.set(parent.children.indexOf(target), node);
+    } else {
+      Node host = target != null && target.content.kind == Content.Kind.NONE ? target : page().rootNode;
+      host.add(node, host.children.size(), 0);
+    }
+    selectedId = node.id;
+    document.validate();
+    relayout(true);
+    recordHistory("attach");
+    status.setText(String.format("Attached %s (%.0f x %.0f mm). It stays linked until you embed it.",
+        file.getName(), open.box.width, open.box.height));
+  }
+
+  /** Copies an attached project in and drops the link. */
+  public void embedSelected() {
+    Node node = document == null || selectedId == null ? null : page().rootNode.find(selectedId);
+    if (node == null || node.content.kind != Content.Kind.PROJECT)
+      throw new IllegalArgumentException("Select an attached project first.");
+    LinkedProjects.Attached open = attachments.open(node.content.project);
+    if (open == null) throw new IllegalArgumentException(attachments.failure(node.content.project));
+    Node embedded = DocumentEdits.embedAttached(page(), node.id, document, open);
+    selectedId = embedded.id;
+    document.validate();
+    relayout(true);
+    recordHistory("embed");
+    status.setText("Embedded the figure. It no longer follows the file it came from.");
+  }
+
+  private static boolean sameFile(File a, File b) {
+    try {
+      return a.getCanonicalFile().equals(b.getCanonicalFile());
+    } catch (java.io.IOException ex) {
+      return a.getAbsolutePath().equals(b.getAbsolutePath());
+    }
   }
 }

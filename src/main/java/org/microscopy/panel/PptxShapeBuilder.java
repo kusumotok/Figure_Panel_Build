@@ -30,12 +30,26 @@ final class PptxShapeBuilder {
   }
 
   private final SourceProvider sources;
+  private final LinkedProjects attachments;
+  private double originXmm, originYmm, scale = 1;
   private StyleResolver styles;
   private Page styledPage;
   private final ScientificImageRenderer images = new ScientificImageRenderer();
   private int nextId = 2;
 
-  PptxShapeBuilder(SourceProvider sources) { this.sources = sources; }
+  PptxShapeBuilder(SourceProvider sources) { this(sources, new LinkedProjects()); }
+
+  PptxShapeBuilder(SourceProvider sources, LinkedProjects attachments) {
+    this.sources = sources;
+    this.attachments = attachments;
+  }
+
+  /** Maps a rectangle from the document being walked into the page being written. */
+  private RectMm placed(RectMm rect) {
+    if (scale == 1 && originXmm == 0 && originYmm == 0) return rect;
+    return new RectMm(originXmm + rect.x * scale, originYmm + rect.y * scale,
+        rect.width * scale, rect.height * scale);
+  }
 
   Slide build(Document document, Page page, LayoutResult layout, double dpi, String qualityLabel,
       MediaCache cache) throws IOException {
@@ -48,7 +62,7 @@ final class PptxShapeBuilder {
     for (String id : layout.paintOrder()) {
       Node node = byId.get(id);
       if (node == null) continue;
-      RectMm rect = layout.of(id);
+      RectMm rect = placed(layout.of(id));
       if (rect.width <= 0 || rect.height <= 0) continue;
       switch (node.content.kind) {
         case SCIENTIFIC_IMAGE:
@@ -61,6 +75,9 @@ final class PptxShapeBuilder {
           break;
         case SHAPE:
           shape(slide, node, rect);
+          break;
+        case PROJECT:
+          attached(slide, node, rect, dpi, qualityLabel, cache);
           break;
         default:
           frame(slide, node, rect);
@@ -222,8 +239,8 @@ final class PptxShapeBuilder {
     StringBuilder properties = new StringBuilder("<a:rPr lang=\"en-US\"");
     // A run override wins; otherwise the node's resolved style supplies the value.
     PropertyValue styleSize = literal(node, Prop.FONT_SIZE_PT);
-    double size = run.fontSizePt != null ? run.fontSizePt
-        : styleSize != null ? styleSize.asDouble() : 12;
+    double size = (run.fontSizePt != null ? run.fontSizePt
+        : styleSize != null ? styleSize.asDouble() : 12) * scale;
     properties.append(" sz=\"").append(Math.max(100, (int) Math.round(size * 100))).append("\"");
     if (Boolean.TRUE.equals(flagOr(run.bold, node, Prop.BOLD))) properties.append(" b=\"1\"");
     if (Boolean.TRUE.equals(flagOr(run.italic, node, Prop.ITALIC))) properties.append(" i=\"1\"");
@@ -345,5 +362,50 @@ final class PptxShapeBuilder {
     if (currentParagraph >= 0)
       pieces.add(content.paragraphs.get(currentParagraph).slice(from, to));
     return pieces;
+  }
+
+  /**
+   * An attached project is written into the same slide, its shapes mapped into the cell. The
+   * figure's text therefore stays editable in PowerPoint rather than becoming a picture, and
+   * the reader cannot tell the poster was assembled from separate files.
+   */
+  private void attached(Slide slide, Node node, RectMm rect, double dpi, String qualityLabel,
+      MediaCache cache) throws IOException {
+    ProjectContent content = node.content.project;
+    LinkedProjects.Attached open = attachments.open(content);
+    if (open == null) {
+      frame(slide, node, rect);
+      return;
+    }
+    double fit = Math.min(rect.width / open.box.width, rect.height / open.box.height);
+    double savedX = originXmm, savedY = originYmm, savedScale = scale;
+    StyleResolver savedStyles = styles;
+    Page savedPage = styledPage;
+    originXmm = rect.x;
+    originYmm = rect.y;
+    scale = savedScale * fit;
+    try {
+      LayoutResult inner = new LayoutEngine(
+          new DefaultContentMeasurer(ContentMeasurer.NOMINAL_DPI, attachments))
+          .layout(open.document, open.page);
+      PptxShapeBuilder inner2 = new PptxShapeBuilder(open.library, attachments);
+      inner2.nextId = nextId;
+      inner2.originXmm = originXmm;
+      inner2.originYmm = originYmm;
+      inner2.scale = scale;
+      Slide nested = inner2.build(open.document, open.page, inner, dpi, qualityLabel, cache);
+      nextId = inner2.nextId;
+      slide.shapes.append(nested.shapes);
+      slide.relationships.append(nested.relationships);
+      slide.media.putAll(nested.media);
+      slide.renderedMedia += nested.renderedMedia;
+      slide.reusedMedia += nested.reusedMedia;
+    } finally {
+      originXmm = savedX;
+      originYmm = savedY;
+      scale = savedScale;
+      styles = savedStyles;
+      styledPage = savedPage;
+    }
   }
 }

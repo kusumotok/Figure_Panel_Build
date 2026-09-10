@@ -24,6 +24,12 @@ import java.util.zip.ZipOutputStream;
  * derived data that a later save simply regenerates.
  */
 public final class PptxProjectWriter {
+  private final LinkedProjects attachments;
+
+  public PptxProjectWriter() { this(new LinkedProjects()); }
+
+  public PptxProjectWriter(LinkedProjects attachments) { this.attachments = attachments; }
+
   public static final class Options {
     /** Preview by default: a save must stay fast enough to press every few seconds. */
     public double thumbnailDpi = RenderTarget.PREVIEW_DPI;
@@ -58,7 +64,7 @@ public final class PptxProjectWriter {
     Map<String, byte[]> parts = new LinkedHashMap<String, byte[]>();
     List<String> warnings = new ArrayList<String>();
     PptxShapeBuilder.MediaCache cache = previousMedia(destination);
-    PptxShapeBuilder builder = new PptxShapeBuilder(sources);
+    PptxShapeBuilder builder = new PptxShapeBuilder(sources, attachments);
     StringBuilder slideRels = new StringBuilder(), slideIds = new StringBuilder();
     StringBuilder overrides = new StringBuilder();
     int rendered = 0, reused = 0, mediaParts = 0;
@@ -66,7 +72,8 @@ public final class PptxProjectWriter {
 
     for (int i = 0; i < document.pages.size(); i++) {
       Page page = document.pages.get(i);
-      LayoutResult layout = new LayoutEngine().layout(document, page);
+      LayoutResult layout = new LayoutEngine(
+          new DefaultContentMeasurer(ContentMeasurer.NOMINAL_DPI, attachments)).layout(document, page);
       warnings.addAll(layout.warnings());
       if (i == 0) firstPage = layout.pageBox();
       PptxShapeBuilder.Slide slide = builder.build(document, page, layout, options.thumbnailDpi,

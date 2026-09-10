@@ -2,6 +2,7 @@ package org.microscopy.panel;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
 /**
  * Structural edits on the node tree, kept out of the canvas so the gestures stay thin and the
@@ -227,5 +228,85 @@ public final class DocumentEdits {
     if (node.content.kind != Content.Kind.TEXT)
       throw new IllegalArgumentException("Only a text node has a text area.");
     node.content.text.flowRegion = null;
+  }
+
+  /**
+   * Replaces an attached project with a copy of its contents, cutting the link. The same choice
+   * a page layout program offers for placed artwork: linked while the figure is still moving,
+   * embedded once it has settled or when the poster has to travel on its own.
+   *
+   * <p>Ids are given a fresh prefix so two copies of the same figure can sit side by side, and
+   * the styles and assets it needs come with it.
+   */
+  public static Node embedAttached(Page page, String nodeId, Document into,
+      LinkedProjects.Attached attached) {
+    Node node = require(page, nodeId);
+    if (node.content.kind != Content.Kind.PROJECT)
+      throw new IllegalArgumentException("Only an attached project can be embedded.");
+    Node parent = page.rootNode.parentOf(nodeId);
+    if (parent == null) throw new IllegalArgumentException("The page root cannot be replaced.");
+    String prefix = java.util.UUID.randomUUID().toString().substring(0, 8) + "-";
+    Document copy = new DocumentSerializer().copy(attached.document);
+    Page source = copy.pages.get(copy.pages.indexOf(pageOf(copy, attached.page.id)));
+
+    for (Map.Entry<String, Token> token : attached.document.tokens.entrySet())
+      into.tokens.put(prefix + token.getKey(), rename(token.getValue(), prefix));
+    for (Map.Entry<String, Style> style : copy.styles.entrySet())
+      into.styles.put(prefix + style.getKey(), rename(style.getValue(), prefix));
+    for (Map.Entry<String, Asset> asset : copy.assets.entrySet())
+      into.assets.put(prefix + asset.getKey(), rename(asset.getValue(), prefix));
+
+    Node embedded = source.rootNode;
+    reid(embedded, prefix);
+    embedded.name = node.name == null || node.name.isEmpty() ? embedded.name : node.name;
+    embedded.placement = node.placement;
+    embedded.size = node.size;
+    parent.children.set(parent.children.indexOf(node), embedded);
+    return embedded;
+  }
+
+  private static Page pageOf(Document document, String pageId) {
+    for (Page page : document.pages) if (page.id.equals(pageId)) return page;
+    return document.pages.get(0);
+  }
+
+  private static Token rename(Token token, String prefix) {
+    token.id = prefix + token.id;
+    if (token.aliasOf != null && !token.aliasOf.isEmpty()) token.aliasOf = prefix + token.aliasOf;
+    return token;
+  }
+
+  private static Style rename(Style style, String prefix) {
+    style.id = prefix + style.id;
+    for (PropertyValue value : style.properties.values())
+      if (value.kind == PropertyValue.Kind.TOKEN_REF) value.tokenId = prefix + value.tokenId;
+    return style;
+  }
+
+  private static Asset rename(Asset asset, String prefix) {
+    asset.id = prefix + asset.id;
+    for (Asset.Part part : asset.parts) part.assetId = prefix + part.assetId;
+    return asset;
+  }
+
+  private static void reid(Node node, String prefix) {
+    node.id = prefix + node.id;
+    if (node.appearance.styleId != null) node.appearance.styleId = prefix + node.appearance.styleId;
+    for (PropertyValue value : node.appearance.overrides.values())
+      if (value.kind == PropertyValue.Kind.TOKEN_REF) value.tokenId = prefix + value.tokenId;
+    if (node.size.width.kind == SizeExpr.Kind.SAME_AS)
+      node.size.width.siblingId = prefix + node.size.width.siblingId;
+    if (node.size.height.kind == SizeExpr.Kind.SAME_AS)
+      node.size.height.siblingId = prefix + node.size.height.siblingId;
+    if (node.content.kind == Content.Kind.SCIENTIFIC_IMAGE) {
+      node.content.scientificImage.assetId = prefix + node.content.scientificImage.assetId;
+      // The wrapped figure configuration addresses its source by the same id.
+      for (org.microscopy.figure.ConditionConfig condition
+          : node.content.scientificImage.figureConfig.conditions)
+        condition.sourceId = prefix + condition.sourceId;
+    }
+    if (node.content.kind == Content.Kind.IMAGE)
+      node.content.image.assetId = prefix + node.content.image.assetId;
+    for (Node child : node.children) reid(child, prefix);
   }
 }

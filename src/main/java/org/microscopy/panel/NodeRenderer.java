@@ -26,6 +26,7 @@ public final class NodeRenderer {
   private final ScientificImageRenderer images = new ScientificImageRenderer();
   private final TextRenderer text = new TextRenderer();
   private final java.util.Set<String> overflowed = new java.util.LinkedHashSet<String>();
+  private final LinkedProjects attachments;
   private final LinkedHashMap<String, BufferedImage> cache =
       new LinkedHashMap<String, BufferedImage>(16, 0.75f, true) {
         protected boolean removeEldestEntry(Map.Entry<String, BufferedImage> eldest) {
@@ -33,7 +34,12 @@ public final class NodeRenderer {
         }
       };
 
-  public NodeRenderer(SourceProvider sources) { this.sources = sources; }
+  public NodeRenderer(SourceProvider sources) { this(sources, new LinkedProjects()); }
+
+  public NodeRenderer(SourceProvider sources, LinkedProjects attachments) {
+    this.sources = sources;
+    this.attachments = attachments;
+  }
 
   public void clearCache() { cache.clear(); }
 
@@ -91,6 +97,9 @@ public final class NodeRenderer {
         break;
       case SHAPE:
         paintShape(g, node, x, y, width, height);
+        break;
+      case PROJECT:
+        paintAttached(g, node, x, y, width, height, target);
         break;
       default:
         break;
@@ -260,5 +269,38 @@ public final class NodeRenderer {
     java.awt.Color colour = styles.color(styledPage, node.id, Prop.TEXT_COLOR);
     if (colour != null) defaults.colorHex = PropertyValue.hex(colour);
     return defaults;
+  }
+
+  /**
+   * An attached project is laid out at its own size and then drawn to fit the cell. It is not
+   * re-flowed: a figure has to look the same wherever it is placed, only smaller.
+   */
+  private void paintAttached(Graphics2D g, Node node, int x, int y, int width, int height,
+      RenderTarget target) {
+    ProjectContent content = node.content.project;
+    LinkedProjects.Attached open = attachments.open(content);
+    if (open == null) {
+      placeholder(g, x, y, width, height, attachments.failure(content));
+      return;
+    }
+    double scale = Math.min(width / (open.box.width / Units.MM_PER_INCH * target.dpi),
+        height / (open.box.height / Units.MM_PER_INCH * target.dpi));
+    RenderTarget inner = new RenderTarget(target.dpi * scale, target.background);
+    LayoutResult layout = new LayoutEngine(
+        new DefaultContentMeasurer(ContentMeasurer.NOMINAL_DPI, attachments))
+        .layout(open.document, open.page);
+    // A separate renderer: the style resolver and caches belong to the attached document.
+    NodeRenderer nested = new NodeRenderer(open.library, attachments);
+    nested.paint(g, open.document, open.page, layout, inner, null, -x, -y);
+    overflowed.addAll(nested.overflowedNodes());
+  }
+
+  private static void placeholder(Graphics2D g, int x, int y, int width, int height,
+      String reason) {
+    g.setColor(new Color(245, 245, 245));
+    g.fillRect(x, y, width, height);
+    g.setColor(new Color(200, 120, 120));
+    g.drawRect(x, y, width - 1, height - 1);
+    g.drawString(reason == null ? "attached project unavailable" : reason, x + 6, y + 18);
   }
 }
