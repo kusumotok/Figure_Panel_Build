@@ -150,6 +150,16 @@ public final class PosterUiValidation {
     pause();
     check("B and C dock hides for a container", !frame[0].contrastShown());
 
+    File tiff = folder.resolve("poster.tif").toFile();
+    SwingUtilities.invokeAndWait(() -> {
+      try {
+        frame[0].exportTiffTo(tiff, 120);
+      } catch (Exception ex) {
+        throw new RuntimeException(ex);
+      }
+    });
+    check("Exported a calibrated TIFF", tiff.isFile() && tiff.length() > 0);
+
     // Styles: create one, apply it to a node, and see it change the render.
     SwingUtilities.invokeAndWait(() -> {
       Document live = frame[0].document();

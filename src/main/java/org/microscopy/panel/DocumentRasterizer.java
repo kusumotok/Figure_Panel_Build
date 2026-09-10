@@ -99,4 +99,39 @@ public final class DocumentRasterizer {
       Files.deleteIfExists(temp);
     }
   }
+
+  /**
+   * Writes a TIFF through ImageJ's encoder, which needs the whole raster at once. PNG is banded
+   * and has no such limit, so this refuses rather than trying and failing on a poster.
+   */
+  public void writeTiff(File destination, Document document, Page page, LayoutResult layout,
+      RenderTarget target, long maxPixels) throws IOException {
+    ProjectSafety.checkDestination(destination, document);
+    int[] size = sizePx(layout, target);
+    long pixels = (long) size[0] * size[1];
+    if (pixels > maxPixels)
+      throw new IllegalArgumentException(String.format(
+          "TIFF is written in one piece and this page is %.0f megapixels at %.0f dpi."
+              + " Export PNG instead, which is written in bands, or lower the resolution.",
+          pixels / 1e6, target.dpi));
+    java.awt.image.BufferedImage whole = rasterizeWhole(document, page, layout, target);
+    Path path = destination.toPath().toAbsolutePath();
+    Path temp = Files.createTempFile(path.getParent(), "panel-", ".tif.tmp");
+    try {
+      ij.ImagePlus image = new ij.ImagePlus(destination.getName(), whole);
+      // Record the physical size so the TIFF opens at the right scale elsewhere.
+      ij.measure.Calibration calibration = image.getCalibration();
+      calibration.pixelWidth = Units.MM_PER_INCH / target.dpi;
+      calibration.pixelHeight = calibration.pixelWidth;
+      calibration.setUnit("mm");
+      if (!new ij.io.FileSaver(image).saveAsTiff(temp.toString()))
+        throw new IOException("ImageJ could not write the TIFF.");
+      Files.move(temp, path, StandardCopyOption.REPLACE_EXISTING);
+    } finally {
+      Files.deleteIfExists(temp);
+    }
+  }
+
+  /** The default ceiling for a one-piece TIFF: comfortable inside a normal Fiji heap. */
+  public static final long TIFF_PIXEL_LIMIT = 120_000_000L;
 }

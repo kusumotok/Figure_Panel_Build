@@ -72,7 +72,7 @@ public class PosterFrame extends JFrame {
     button(toolbar, "Open project PPTX...", "openProject", () -> openProject());
     button(toolbar, "Save project", "saveProject", () -> saveProject(false));
     button(toolbar, "Save as...", "saveProjectAs", () -> saveProject(true));
-    button(toolbar, "Export PNG...", "exportPng", () -> exportPng());
+    button(toolbar, "Export...", "exportPng", () -> exportPng());
     toolbar.add(Box.createHorizontalStrut(12));
     button(toolbar, "Fit", "zoomFit", () -> zoomFit());
     button(toolbar, "-", "zoomOut", () -> canvas.setZoom(canvas.zoom() / 1.25));
@@ -240,25 +240,30 @@ public class PosterFrame extends JFrame {
         file.getName(), saved.bytes / 1e6));
   }
 
+  /** Full resolution output. Separate from Save, which writes preview quality on purpose. */
   public void exportPng() {
     require();
-    File file = choose("Export PNG", "png", "PNG image (*.png)", true);
-    if (file == null) return;
-    String answer = (String) JOptionPane.showInputDialog(this,
-        "Target resolution in dpi:\n" + resolution().summary(), "Export PNG",
-        JOptionPane.QUESTION_MESSAGE, null, null, String.valueOf((int) RenderTarget.PRINT_DPI));
-    if (answer == null) return;
-    double dpi = Double.parseDouble(answer.trim());
-    RenderTarget target = new RenderTarget(dpi, RenderTarget.Background.WHITE);
     Page page = document.page(0);
+    ExportDialog dialog = new ExportDialog(this, document, page, layout);
+    dialog.setVisible(true);
+    if (!dialog.confirmed()) return;
+    boolean tiff = dialog.format() == ExportDialog.Format.TIFF;
+    File file = choose(tiff ? "Export TIFF" : "Export PNG", tiff ? "tif" : "png",
+        tiff ? "TIFF image (*.tif)" : "PNG image (*.png)", true);
+    if (file == null) return;
+    RenderTarget target = dialog.target();
+    DocumentRasterizer rasterizer = new DocumentRasterizer(sources);
     try {
-      new DocumentRasterizer(sources).writePng(file, document, page, layout, target);
+      if (tiff)
+        rasterizer.writeTiff(file, document, page, layout, target,
+            DocumentRasterizer.TIFF_PIXEL_LIMIT);
+      else rasterizer.writePng(file, document, page, layout, target);
     } catch (java.io.IOException ex) {
       throw new IllegalArgumentException("Cannot write " + file.getName() + ": " + ex.getMessage(), ex);
     }
-    int[] size = new DocumentRasterizer(sources).sizePx(layout, target);
+    int[] size = rasterizer.sizePx(layout, target);
     status.setText(String.format("Exported %s at %.0f dpi (%d x %d px). %s",
-        file.getName(), dpi, size[0], size[1], resolution().summary()));
+        file.getName(), target.dpi, size[0], size[1], resolution().summary()));
   }
 
   private void require() {
@@ -429,6 +434,13 @@ public class PosterFrame extends JFrame {
     status.setText(String.format("Saved %s as a project (%.1f MB, pictures at preview quality).",
         file.getName(), saved.bytes / 1e6));
     return saved;
+  }
+
+  public void exportTiffTo(File file, double dpi) throws java.io.IOException {
+    require();
+    new DocumentRasterizer(sources).writeTiff(file, document, document.page(0), layout,
+        new RenderTarget(dpi, RenderTarget.Background.WHITE),
+        DocumentRasterizer.TIFF_PIXEL_LIMIT);
   }
 
   public void exportPngTo(File file, double dpi) throws java.io.IOException {
