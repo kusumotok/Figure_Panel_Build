@@ -189,6 +189,7 @@ public class PosterFrame extends JFrame {
     selectedId = document.page(0).rootNode.id;
     relayout(true);
     status.setText(opened.message);
+    reviewPowerPointEdits(file);
   }
 
   /**
@@ -647,5 +648,37 @@ public class PosterFrame extends JFrame {
         }
       }
     });
+  }
+
+  /**
+   * Reopening reads the document from the project part and then asks what PowerPoint changed.
+   * The report is shown before anything is imported, so nothing arrives unannounced.
+   */
+  private void reviewPowerPointEdits(File file) {
+    PptxDiff diff = new PptxDiff();
+    PptxDiff.Report report;
+    try {
+      report = diff.compare(file, document);
+    } catch (java.io.IOException ex) {
+      status.setText("Could not check for PowerPoint edits: " + ex.getMessage());
+      return;
+    }
+    if (report.isEmpty()) return;
+    int answer = JOptionPane.showConfirmDialog(this,
+        report.summary() + "\n\nImport the compatible changes?", "PowerPoint edits detected",
+        JOptionPane.YES_NO_OPTION, JOptionPane.INFORMATION_MESSAGE);
+    if (answer != JOptionPane.YES_OPTION) {
+      status.setText(report.importable().size() + " PowerPoint change(s) were left out; "
+          + report.ignored().size() + " could not be imported in any case.");
+      return;
+    }
+    try {
+      int applied = diff.apply(file, document);
+      relayout(true);
+      status.setText("Imported " + applied + " PowerPoint change(s); "
+          + report.ignored().size() + " unsupported change(s) ignored.");
+    } catch (java.io.IOException ex) {
+      status.setText("Could not import the PowerPoint edits: " + ex.getMessage());
+    }
   }
 }
