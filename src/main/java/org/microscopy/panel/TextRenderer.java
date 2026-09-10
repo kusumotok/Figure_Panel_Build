@@ -23,6 +23,8 @@ import java.util.Map;
  * runs is filled twice, which is what makes text wrap around a figure rather than over it.
  */
 public class TextRenderer {
+  private Defaults defaults = new Defaults();
+
   /** Somewhere text may be placed, in pixels relative to the node. */
   public interface FlowShape {
     double top();
@@ -43,6 +45,13 @@ public class TextRenderer {
       this.layout = layout; this.x = x; this.baseline = baseline;
       this.paragraph = paragraph; this.start = start; this.limit = limit;
     }
+  }
+
+  /** Values a run falls back to; supplied by the style resolver. */
+  public static final class Defaults {
+    public Double fontSizePt;
+    public String latinFamily, eaFamily, colorHex;
+    public Boolean bold, italic, underline;
   }
 
   public static final class Flowed {
@@ -104,6 +113,12 @@ public class TextRenderer {
    */
   public Flowed flow(Graphics2D g, TextContent content, List<FlowShape> shapes, double dpi,
       Align defaultAlign) {
+    return flow(g, content, shapes, dpi, defaultAlign, new Defaults());
+  }
+
+  public Flowed flow(Graphics2D g, TextContent content, List<FlowShape> shapes, double dpi,
+      Align defaultAlign, Defaults defaults) {
+    this.defaults = defaults == null ? new Defaults() : defaults;
     Flowed first = fill(g, content, shapes, dpi, defaultAlign, 1);
     if (!first.overflowed || content.overflow != TextContent.Overflow.AUTO_SHRINK) return first;
     // Shrinking stops at seventy percent; past that the text is no longer the size it was set in
@@ -191,8 +206,8 @@ public class TextRenderer {
     for (Line line : flowed.lines) line.layout.draw(g, line.x, line.baseline);
   }
 
-  private static double largestFontPt(Paragraph paragraph) {
-    double size = 12;
+  private double largestFontPt(Paragraph paragraph) {
+    double size = defaults.fontSizePt == null ? 12 : defaults.fontSizePt;
     for (Run run : paragraph.runs) if (run.fontSizePt != null) size = Math.max(size, run.fontSizePt);
     return size;
   }
@@ -216,18 +231,26 @@ public class TextRenderer {
   private void apply(AttributedString attributed, Run run, int start, int end, double dpi,
       double scale) {
     Map<TextAttribute, Object> attributes = new HashMap<TextAttribute, Object>();
-    attributes.put(TextAttribute.FAMILY, run.latinFamily == null ? Font.SANS_SERIF : run.latinFamily);
-    attributes.put(TextAttribute.SIZE,
-        ptToPx((run.fontSizePt == null ? 12 : run.fontSizePt) * scale, dpi));
-    if (Boolean.TRUE.equals(run.bold)) attributes.put(TextAttribute.WEIGHT, TextAttribute.WEIGHT_BOLD);
-    if (Boolean.TRUE.equals(run.italic)) attributes.put(TextAttribute.POSTURE, TextAttribute.POSTURE_OBLIQUE);
-    if (Boolean.TRUE.equals(run.underline))
+    // A run override wins; otherwise the value the style resolver worked out applies.
+    String family = run.latinFamily != null ? run.latinFamily
+        : defaults.latinFamily != null ? defaults.latinFamily : Font.SANS_SERIF;
+    double size = run.fontSizePt != null ? run.fontSizePt
+        : defaults.fontSizePt != null ? defaults.fontSizePt : 12;
+    attributes.put(TextAttribute.FAMILY, family);
+    attributes.put(TextAttribute.SIZE, ptToPx(size * scale, dpi));
+    if (Boolean.TRUE.equals(run.bold != null ? run.bold : defaults.bold))
+      attributes.put(TextAttribute.WEIGHT, TextAttribute.WEIGHT_BOLD);
+    if (Boolean.TRUE.equals(run.italic != null ? run.italic : defaults.italic))
+      attributes.put(TextAttribute.POSTURE, TextAttribute.POSTURE_OBLIQUE);
+    if (Boolean.TRUE.equals(run.underline != null ? run.underline : defaults.underline))
       attributes.put(TextAttribute.UNDERLINE, TextAttribute.UNDERLINE_ON);
     if (Boolean.TRUE.equals(run.superscript))
       attributes.put(TextAttribute.SUPERSCRIPT, TextAttribute.SUPERSCRIPT_SUPER);
     if (Boolean.TRUE.equals(run.subscript))
       attributes.put(TextAttribute.SUPERSCRIPT, TextAttribute.SUPERSCRIPT_SUB);
-    if (run.colorHex != null) attributes.put(TextAttribute.FOREGROUND, PropertyValue.of(run.colorHex).asColor());
+    String colour = run.colorHex != null ? run.colorHex : defaults.colorHex;
+    if (colour != null)
+      attributes.put(TextAttribute.FOREGROUND, PropertyValue.of(colour).asColor());
     for (Map.Entry<TextAttribute, Object> entry : attributes.entrySet())
       attributed.addAttribute(entry.getKey(), entry.getValue(), start, end);
   }

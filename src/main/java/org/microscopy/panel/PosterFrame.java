@@ -40,6 +40,7 @@ public class PosterFrame extends JFrame {
   private org.microscopy.figure.ContrastPanel contrast;
   private String contrastNodeId;
   private java.util.Set<String> overflowing = new java.util.LinkedHashSet<String>();
+  private final StyleManagerPanel stylePanel;
 
   public PosterFrame() {
     super("Poster / Layout");
@@ -58,6 +59,12 @@ public class PosterFrame extends JFrame {
     inspector = new Inspector(new Inspector.Listener() {
       public void documentChanged() { relayout(true); }
     });
+    stylePanel = new StyleManagerPanel(new StyleManagerPanel.Listener() {
+      public String selectedNodeId() { return selectedId; }
+
+      public void documentChanged() { attempt(() -> relayout(true)); }
+    });
+    installStyleDrops();
 
     JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 4, 4));
     button(toolbar, "Add images...", "addImages", () -> addImagesFromContainer());
@@ -83,6 +90,7 @@ public class PosterFrame extends JFrame {
     setLayout(new BorderLayout());
     add(top, BorderLayout.NORTH);
     add(scroll, BorderLayout.CENTER);
+    add(stylePanel, BorderLayout.WEST);
     add(new JScrollPane(inspector), BorderLayout.EAST);
     contrastDock.setVisible(false);
     JPanel bottom = new JPanel(new BorderLayout());
@@ -366,6 +374,7 @@ public class PosterFrame extends JFrame {
     Page page = document.page(0);
     layout = new LayoutEngine().layout(document, page);
     canvas.show(document, page, layout);
+    stylePanel.show(document);
     if (!keepSelection || selectedId == null || !layout.has(selectedId))
       selectedId = page.rootNode.id;
     select(selectedId);
@@ -606,4 +615,37 @@ public class PosterFrame extends JFrame {
   }
 
   public java.util.Set<String> overflowingNodes() { return overflowing; }
+
+  /**
+   * Dropping a style onto the canvas applies it to the node under the pointer. Dragging it to
+   * the thing it should affect is more direct than selecting first and pressing a button.
+   */
+  private void installStyleDrops() {
+    canvas.setTransferHandler(new javax.swing.TransferHandler() {
+      public boolean canImport(TransferSupport support) {
+        return support.isDrop()
+            && support.isDataFlavorSupported(java.awt.datatransfer.DataFlavor.stringFlavor);
+      }
+
+      public boolean importData(TransferSupport support) {
+        if (!canImport(support) || document == null) return false;
+        try {
+          String payload = (String) support.getTransferable()
+              .getTransferData(java.awt.datatransfer.DataFlavor.stringFlavor);
+          if (!payload.startsWith(StyleManagerPanel.PREFIX)) return false;
+          String styleId = payload.substring(StyleManagerPanel.PREFIX.length());
+          String nodeId = canvas.nodeAt(support.getDropLocation().getDropPoint());
+          if (nodeId == null) return false;
+          stylePanel.apply(styleId, nodeId);
+          select(nodeId);
+          Node node = page().rootNode.find(nodeId);
+          status.setText("Applied the style to " + (node == null || node.name.isEmpty()
+              ? nodeId : node.name) + ".");
+          return true;
+        } catch (Exception ex) {
+          return false;
+        }
+      }
+    });
+  }
 }

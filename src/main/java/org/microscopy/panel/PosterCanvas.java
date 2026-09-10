@@ -403,4 +403,15 @@ public class PosterCanvas extends JPanel {
       return error;
     }
   }
+
+  /**
+   * Accepts a style dropped from the style list and hands back the node under the pointer, so a
+   * style can be applied by dragging it onto the thing it should affect.
+   */
+  /** The node under a point given in this component's pixels, or null. */
+  public String nodeAt(java.awt.Point point) {
+    if (layout == null) return null;
+    java.awt.Point origin = origin();
+    return layout.hit(page.rootNode, toMm(point.x - origin.x), toMm(point.y - origin.y));
+  }
 }

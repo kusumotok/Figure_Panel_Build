@@ -150,6 +150,28 @@ public final class PosterUiValidation {
     pause();
     check("B and C dock hides for a container", !frame[0].contrastShown());
 
+    // Styles: create one, apply it to a node, and see it change the render.
+    SwingUtilities.invokeAndWait(() -> {
+      Document live = frame[0].document();
+      live.tokens.put("body-size",
+          new Token("body-size", "Body size", Token.Kind.FONT_SIZE_PT, "40"));
+      Style heading = new Style("heading", "Heading");
+      heading.set(Prop.FONT_SIZE_PT, PropertyValue.token("body-size"));
+      heading.set(Prop.TEXT_COLOR, PropertyValue.of(java.awt.Color.RED));
+      live.styles.put(heading.id, heading);
+      Node title = live.page(0).rootNode.children.get(0);
+      title.appearance.styleId = "heading";
+      title.content.text.paragraphs.get(0).runs.get(0).fontSizePt = null;
+      frame[0].show(live, inputs);
+    });
+    pause();
+    Document styled = frame[0].document();
+    StyleResolver resolver = new StyleResolver(styled);
+    check("A style resolves through its token",
+        Double.valueOf(40).equals(resolver.number(styled.page(0),
+            styled.page(0).rootNode.children.get(0).id, Prop.FONT_SIZE_PT)));
+    shot(frame[0], folder.resolve("08-styles.png"));
+
     check("Source TIFFs unchanged", java.util.Arrays.equals(hashes, hashes(folder)));
     SwingUtilities.invokeAndWait(() -> frame[0].dispose());
 

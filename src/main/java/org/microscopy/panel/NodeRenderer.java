@@ -21,6 +21,8 @@ public final class NodeRenderer {
   private static final int CACHE_LIMIT = 64;
 
   private final SourceProvider sources;
+  private StyleResolver styles;
+  private Page styledPage;
   private final ScientificImageRenderer images = new ScientificImageRenderer();
   private final TextRenderer text = new TextRenderer();
   private final java.util.Set<String> overflowed = new java.util.LinkedHashSet<String>();
@@ -44,6 +46,8 @@ public final class NodeRenderer {
    */
   public void paint(Graphics2D g, Document document, Page page, LayoutResult layout,
       RenderTarget target, RectMm clipMm, int originPxX, int originPxY) {
+    styles = new StyleResolver(document);
+    styledPage = page;
     Map<String, Node> byId = new HashMap<String, Node>();
     index(page.rootNode, byId);
     g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
@@ -66,9 +70,9 @@ public final class NodeRenderer {
     for (Node child : node.children) index(child, out);
   }
 
-  private static boolean isHidden(Node node) {
-    PropertyValue visible = node.appearance.overrides.get(Prop.VISIBLE);
-    return visible != null && visible.kind == PropertyValue.Kind.LITERAL && !visible.asBoolean();
+  private boolean isHidden(Node node) {
+    Boolean visible = styles.flag(styledPage, node.id, Prop.VISIBLE);
+    return visible != null && !visible;
   }
 
   private void paintNode(Graphics2D g, Document document, Node node, int x, int y,
@@ -94,15 +98,14 @@ public final class NodeRenderer {
     border(g, node, x, y, width, height, target);
   }
 
-  private static Color color(Node node, String key) {
-    PropertyValue value = node.appearance.overrides.get(key);
-    // Styles and tokens resolve in the style pass; a literal is usable straight away.
-    return value == null || value.kind != PropertyValue.Kind.LITERAL ? null : value.asColor();
+  /** Overrides, then the node's style, then inheritance: all of it through one resolver. */
+  private Color color(Node node, String key) {
+    return styles.color(styledPage, node.id, key);
   }
 
-  private static double number(Node node, String key) {
-    PropertyValue value = node.appearance.overrides.get(key);
-    return value == null || value.kind != PropertyValue.Kind.LITERAL ? 0 : value.asDouble();
+  private double number(Node node, String key) {
+    Double value = styles.number(styledPage, node.id, key);
+    return value == null ? 0 : value;
   }
 
   private void background(Graphics2D g, Node node, int x, int y, int width, int height) {
@@ -178,9 +181,12 @@ public final class NodeRenderer {
       } else {
         local.translate(x, y);
       }
+      TextRenderer.Defaults defaults = textDefaults(node);
       TextRenderer.Flowed flowed = shapes != null && !shapes.isEmpty()
-          ? text.flow(local, content, shapes, target.dpi, Align.START)
-          : text.flow(local, content, boxWidth, boxHeight, target.dpi, Align.START);
+          ? text.flow(local, content, shapes, target.dpi, Align.START, defaults)
+          : text.flow(local, content,
+              java.util.Collections.singletonList(TextRenderer.rectangle(boxWidth, boxHeight)),
+              target.dpi, Align.START, defaults);
       // A box centres its block, matching how figure labels sit in their band. A region has
       // already placed every line where it belongs.
       if (shapes == null || shapes.isEmpty())
@@ -237,5 +243,22 @@ public final class NodeRenderer {
     for (FlowRegionGeometry.Island island : islands)
       shapes.add(TextRenderer.island(island, rect.x, rect.y, target.dpi));
     return shapes;
+  }
+
+  /**
+   * What a run falls back to when it says nothing itself: the node's style, resolved through its
+   * tokens and inherited from its ancestors.
+   */
+  private TextRenderer.Defaults textDefaults(Node node) {
+    TextRenderer.Defaults defaults = new TextRenderer.Defaults();
+    defaults.fontSizePt = styles.number(styledPage, node.id, Prop.FONT_SIZE_PT);
+    defaults.latinFamily = styles.text(styledPage, node.id, Prop.LATIN_FAMILY);
+    defaults.eaFamily = styles.text(styledPage, node.id, Prop.EA_FAMILY);
+    defaults.bold = styles.flag(styledPage, node.id, Prop.BOLD);
+    defaults.italic = styles.flag(styledPage, node.id, Prop.ITALIC);
+    defaults.underline = styles.flag(styledPage, node.id, Prop.UNDERLINE);
+    java.awt.Color colour = styles.color(styledPage, node.id, Prop.TEXT_COLOR);
+    if (colour != null) defaults.colorHex = PropertyValue.hex(colour);
+    return defaults;
   }
 }

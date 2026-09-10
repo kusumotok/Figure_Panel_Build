@@ -30,6 +30,8 @@ final class PptxShapeBuilder {
   }
 
   private final SourceProvider sources;
+  private StyleResolver styles;
+  private Page styledPage;
   private final ScientificImageRenderer images = new ScientificImageRenderer();
   private int nextId = 2;
 
@@ -37,6 +39,8 @@ final class PptxShapeBuilder {
 
   Slide build(Document document, Page page, LayoutResult layout, double dpi, String qualityLabel,
       MediaCache cache) throws IOException {
+    styles = new StyleResolver(document);
+    styledPage = page;
     Slide slide = new Slide();
     Map<String, Node> byId = new HashMap<String, Node>();
     index(page.rootNode, byId);
@@ -118,12 +122,15 @@ final class PptxShapeBuilder {
         .append(outline(node)).append("</p:spPr></p:pic>");
   }
 
-  private static PropertyValue literal(Node node, String key) {
-    PropertyValue value = node.appearance.overrides.get(key);
-    return value == null || value.kind != PropertyValue.Kind.LITERAL ? null : value;
+  /**
+   * The same resolver the renderer uses, so a style that shows on screen is the style that
+   * reaches PowerPoint.
+   */
+  private PropertyValue literal(Node node, String key) {
+    return styles == null ? null : styles.resolve(styledPage, node.id, key);
   }
 
-  private static String outline(Node node) {
+  private String outline(Node node) {
     PropertyValue color = literal(node, Prop.BORDER_COLOR);
     PropertyValue width = literal(node, Prop.BORDER_WIDTH_MM);
     if (color == null || width == null || width.asDouble() <= 0) return "<a:ln><a:noFill/></a:ln>";
@@ -131,7 +138,7 @@ final class PptxShapeBuilder {
         + hex(color) + "\"/></a:solidFill></a:ln>";
   }
 
-  private static String fill(Node node) {
+  private String fill(Node node) {
     PropertyValue color = literal(node, Prop.FILL);
     return color == null ? "<a:noFill/>"
         : "<a:solidFill><a:srgbClr val=\"" + hex(color) + "\"/></a:solidFill>";
@@ -213,11 +220,15 @@ final class PptxShapeBuilder {
 
   private String run(Node node, Run run) {
     StringBuilder properties = new StringBuilder("<a:rPr lang=\"en-US\"");
-    double size = run.fontSizePt == null ? 12 : run.fontSizePt;
+    // A run override wins; otherwise the node's resolved style supplies the value.
+    PropertyValue styleSize = literal(node, Prop.FONT_SIZE_PT);
+    double size = run.fontSizePt != null ? run.fontSizePt
+        : styleSize != null ? styleSize.asDouble() : 12;
     properties.append(" sz=\"").append(Math.max(100, (int) Math.round(size * 100))).append("\"");
-    if (Boolean.TRUE.equals(run.bold)) properties.append(" b=\"1\"");
-    if (Boolean.TRUE.equals(run.italic)) properties.append(" i=\"1\"");
-    if (Boolean.TRUE.equals(run.underline)) properties.append(" u=\"sng\"");
+    if (Boolean.TRUE.equals(flagOr(run.bold, node, Prop.BOLD))) properties.append(" b=\"1\"");
+    if (Boolean.TRUE.equals(flagOr(run.italic, node, Prop.ITALIC))) properties.append(" i=\"1\"");
+    if (Boolean.TRUE.equals(flagOr(run.underline, node, Prop.UNDERLINE)))
+      properties.append(" u=\"sng\"");
     if (Boolean.TRUE.equals(run.superscript)) properties.append(" baseline=\"30000\"");
     if (Boolean.TRUE.equals(run.subscript)) properties.append(" baseline=\"-25000\"");
     properties.append(">");
@@ -232,11 +243,25 @@ final class PptxShapeBuilder {
           .append("\"/></a:solidFill>");
     // Latin and East Asian faces stay separate, as PowerPoint models them.
     properties.append("<a:latin typeface=\"")
-        .append(Ooxml.xml(run.latinFamily == null ? "Arial" : run.latinFamily)).append("\"/>");
+        .append(Ooxml.xml(textOr(run.latinFamily, node, Prop.LATIN_FAMILY, "Arial")))
+        .append("\"/>");
     properties.append("<a:ea typeface=\"")
-        .append(Ooxml.xml(run.eaFamily == null ? "Yu Gothic" : run.eaFamily)).append("\"/>");
+        .append(Ooxml.xml(textOr(run.eaFamily, node, Prop.EA_FAMILY, "Yu Gothic")))
+        .append("\"/>");
     properties.append("</a:rPr>");
     return "<a:r>" + properties + "<a:t xml:space=\"preserve\">" + Ooxml.xml(run.text) + "</a:t></a:r>";
+  }
+
+  private Boolean flagOr(Boolean override, Node node, String key) {
+    if (override != null) return override;
+    PropertyValue value = literal(node, key);
+    return value == null ? null : Boolean.valueOf(value.asBoolean());
+  }
+
+  private String textOr(String override, Node node, String key, String fallback) {
+    if (override != null) return override;
+    PropertyValue value = literal(node, key);
+    return value == null ? fallback : value.text();
   }
 
   /** A PNG of exactly the expected size, checked straight from the IHDR header. */
