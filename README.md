@@ -234,16 +234,21 @@ Figure を構成要素として、Panel / Poster / Slide まで同じ **Node** �
 
 | 操作 | 説明 |
 |---|---|
-| `Import figure settings...` | 既存の Figure 設定 JSON を読み込み、9 セルの図を「セル 1 つ = 1 ノード」に分解して取り込みます。行・列ラベルは独立したテキストノードになります |
-| `Open project PPTX...` | 本ツールが保存した PPTX をプロジェクトとして再開します。元画像が見つからない場合は再リンクを促します |
-| `Save project` / `Save as...` | PPTX を**プロジェクト正本**として保存します。画像はプレビュー品質（既定 150 dpi）のサムネイル、テキスト・枠・スケールバーはベクタです |
-| `Export PNG...` | 目標 dpi を指定してフル解像度で書き出します。A0 300 dpi（約 140 メガピクセル）も帯分割で処理します |
-| キャンバス | クリックで選択。上部のパンくずで階層を移動。`Esc` で親、`Enter` で子、`Tab` で兄弟 |
-| Inspector | 選択対象が何であっても Layout / Appearance / Typography / Content の 4 節。Width / Height は Auto・Fill・Fixed・Percent・Same as・Aspect から選択し、`Advanced` で min / max を出します |
-| ステータスバー | ページ寸法、各画像の実効 dpi の警告、レイアウト警告（セルに収まらない・ページに収まらない）を表示します |
+| `Add images...` | Bio-Formats 対応コンテナ（LIF / ND2 / OIB / CZI ほか）の series 一覧から取り込みます。1 視野が複数 series に分かれている場合は「何 series で 1 画像か」を指定して合成できます。どの series がどの画像のどのチャネルになるかは実行前に一覧で確認できます |
+| `Import figure settings...` | 既存の Figure 設定 JSON を「セル 1 つ = 1 ノード」に分解して取り込みます。行・列ラベルは独立したテキストノードになります |
+| `Open project PPTX...` | 本ツールが保存した PPTX を再開します。PowerPoint 側の編集があれば内容を報告し、確認のうえ取り込みます |
+| `Save project` / `Save as...` | PPTX を**プロジェクト正本**として保存します。画像はプレビュー品質（既定 150 dpi）、テキスト・枠・スケールバーはベクタです |
+| `Export...` | PNG / TIFF を目標 dpi で書き出します。決定前に px サイズと各画像の実効 dpi が一覧表示されます。A0 300 dpi（約 140 メガピクセル）も帯分割で処理します |
+| キャンバス | クリックで選択、ダブルクリックで子へ。ドラッグでセル間の移動・入れ替え、トラック境界のドラッグで比率変更。Ctrl+ホイールでズーム、Shift+ドラッグでパン |
+| 右クリック | 分割・結合・コンテナ化・コンテナ解除・重ね合わせ化・前面/背面・削除。テキストなら領域の拡張 |
+| キーボード | `Esc` 親へ、`Enter` 子へ、`Tab` 兄弟へ、`Delete` 削除 |
+| Inspector | どの選択でも Layout / Appearance / Typography / Content の 4 節。Width / Height は Auto・Fill・Fixed・Percent・Same as・Aspect から選び、`Advanced` で min / max |
+| B&C ドック | 画像ノードを選ぶと従来の B&C パネルが下部に出ます（LUT・Grayscale・Invert・Min/Max・Auto/Reset・ヒストグラム） |
+| Styles | 左ペインの一覧からキャンバスへドラッグして適用。トークンを介して「サイズは共通・フォントは別」といった部分共有ができます |
+| テキスト | 複数セルにまたがる L 字型の本文領域に対応。収まらない場合はステータスバーが報告します（既定は Warn） |
 
 > **注意**：`Save project` の PPTX は画像がプレビュー品質です。印刷・投稿用は必ず `Export` を使ってください。picture の図形名にも `preview 150 dpi` と入ります。
 
 ### 未実装
 
-Token / Style システム、非矩形テキスト領域、Bio-Formats 経由の Z/T・多 series、PowerPoint 側編集の取り込み、PDF / TIFF / 印刷、キャンバス上でのドラッグ編集（現時点では Inspector から数値で編集します）。
+PDF 出力と印刷設定（bleed・trim mark）、Portable プロジェクト（OME-TIFF 埋め込み）、PowerPoint からの色・フォント取り込み（現状はテキストのみ）、Inspector でのトークン参照切り替え UI、複数ページの編集 UI。
