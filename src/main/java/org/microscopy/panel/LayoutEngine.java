@@ -88,7 +88,10 @@ public final class LayoutEngine {
         // out how tall an aspect-locked picture will be once its column width is settled.
         return available > 0 ? available : intrinsic;
       default:
-        return intrinsic;
+        // Auto means "as big as the content needs", never bigger than the room on offer. A
+        // container whose own tracks are fractions has no natural width, and without this cap
+        // it falls back to its nominal print size and blows the page out.
+        return available > 0 ? Math.min(intrinsic, available) : intrinsic;
     }
   }
 
@@ -164,7 +167,11 @@ public final class LayoutEngine {
     for (Node child : node.children) {
       // Rows are measured against the width the child will actually get, so an aspect ratio is
       // accounted for instead of being discovered after the row height is fixed.
-      double offeredWidth = columns ? 0
+      // The column pass offers the container width as an upper bound, so a child with fraction
+      // tracks of its own is capped instead of falling back to its print size. A Fill child is
+      // offered nothing, because it makes no demand of its own on how wide the track must be.
+      double offeredWidth = columns
+          ? (child.size.width.kind == SizeExpr.Kind.FRACTION ? 0 : innerWidth)
           : resolvedColumns != null
               ? span(resolvedColumns, child.placement.column, child.placement.columnSpan,
                   node.layout.columnGapMm)
@@ -176,6 +183,14 @@ public final class LayoutEngine {
       for (int i = start; i < Math.min(count, start + span); i++)
         if (track(node, columns, i).kind == SizeExpr.Kind.AUTO) bases[i] = Math.max(bases[i], share);
     }
+    // An Auto column can never usefully be wider than the container. Without this a paragraph
+    // asked to measure with no width offered reports its whole unwrapped length and drags the
+    // column, and the page, out with it. Fixed and aspect tracks are left alone so genuine
+    // over-constraint is still reported rather than hidden.
+    if (columns && available > 0)
+      for (int i = 0; i < count; i++)
+        if (track(node, columns, i).kind == SizeExpr.Kind.AUTO)
+          bases[i] = Math.min(bases[i], available);
     return bases;
   }
 
